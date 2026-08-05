@@ -94,10 +94,10 @@ def mostrar_imagen(col, valor):
     """valor puede ser bytes (desde la DB) o una ruta de archivo (parser)."""
     tiene = False
     if isinstance(valor, (bytes, bytearray)) and len(valor) > 0:
-        col.image(bytes(valor), use_container_width=True)
+        col.image(bytes(valor), width="stretch")
         tiene = True
     elif isinstance(valor, str) and valor and os.path.exists(valor):
-        col.image(valor, use_container_width=True)
+        col.image(valor, width="stretch")
         tiene = True
     if not tiene:
         col.markdown("<div style='text-align:center;font-size:36px'>📦</div>", unsafe_allow_html=True)
@@ -156,7 +156,7 @@ if seccion == "➕ Nueva cotización":
         base = pd.DataFrame([{"Producto": "", "Cantidad": None, "Unidad": "pc",
                               "Precio unit": None, "Estado": "Aprobado"}])
         editado = st.data_editor(
-            base, num_rows="dynamic", use_container_width=True, hide_index=True,
+            base, num_rows="dynamic", width="stretch", hide_index=True,
             column_config={
                 "Producto": st.column_config.TextColumn(width="large"),
                 "Cantidad": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
@@ -419,7 +419,7 @@ elif seccion == "🔎 Buscar":
             "Proveedor": f.get("proveedor"),
             "Fecha": f.get("fecha_pedido") or f.get("fecha_emision"),
         } for f in filas])
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("Sin resultados con esos filtros.")
 
