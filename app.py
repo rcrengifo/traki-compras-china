@@ -151,19 +151,42 @@ if seccion == "➕ Nueva cotización":
         m_mon = c5.selectbox("Moneda", ["USD", "CNY"], key="m_mon")
 
         st.markdown("**Productos** — escribe cada uno y agrega filas con el ➕ de la tabla:")
-        base = pd.DataFrame([{"Producto": "", "Cantidad": 0.0, "Unidad": "pc",
-                              "Precio unit": 0.0, "Estado": "Aprobado"}])
+        UNIDADES = ["pc", "set", "pair", "kg", "g", "ton", "m", "meters", "cm",
+                    "box", "roll", "bag", "liter", "m²", "m³", "unit"]
+        base = pd.DataFrame([{"Producto": "", "Cantidad": None, "Unidad": "pc",
+                              "Precio unit": None, "Estado": "Aprobado"}])
         editado = st.data_editor(
             base, num_rows="dynamic", use_container_width=True, hide_index=True,
             column_config={
                 "Producto": st.column_config.TextColumn(width="large"),
                 "Cantidad": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
+                "Unidad": st.column_config.SelectboxColumn(options=UNIDADES, default="pc"),
                 "Precio unit": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
                 "Estado": st.column_config.SelectboxColumn(options=db.ESTADOS_APROB, default="Aprobado"),
             }, key="m_editor",
         )
-        filas = [r for _, r in editado.iterrows() if str(r["Producto"]).strip()]
-        total_m = sum((r["Cantidad"] or 0) * (r["Precio unit"] or 0)
+
+        def _n(x):
+            """convierte a numero seguro (NaN/None -> 0)."""
+            return float(x) if pd.notna(x) else 0.0
+
+        # solo filas con producto escrito (ignora la fila vacía -> evita el 'nan')
+        filas = [r for _, r in editado.iterrows()
+                 if pd.notna(r["Producto"]) and str(r["Producto"]).strip()]
+
+        # fotos opcionales por producto (para que salgan en el Excel a China)
+        fotos = {}
+        if filas:
+            with st.expander("📷 Agregar fotos a los productos (opcional)"):
+                for idx, r in enumerate(filas):
+                    up = st.file_uploader(
+                        f"Foto de: {str(r['Producto']).strip()}",
+                        type=["png", "jpg", "jpeg"], key=f"m_foto_{idx}",
+                    )
+                    if up is not None:
+                        fotos[idx] = up.getvalue()
+
+        total_m = sum(_n(r["Cantidad"]) * _n(r["Precio unit"])
                       for r in filas if r["Estado"] != "Eliminado")
         st.metric(f"Total ({m_mon})", f"{total_m:,.2f}")
 
@@ -173,13 +196,14 @@ if seccion == "➕ Nueva cotización":
                    "incoterm": m_inco, "moneda": m_mon}
             lineas_m = []
             for i, r in enumerate(filas, start=1):
-                q = float(r["Cantidad"] or 0)
-                p = float(r["Precio unit"] or 0)
+                q = _n(r["Cantidad"])
+                p = _n(r["Precio unit"])
+                unidad = r["Unidad"] if pd.notna(r["Unidad"]) else None
                 lineas_m.append({
                     "sn": i, "descripcion": str(r["Producto"]).strip(),
-                    "cantidad": q, "cantidad_aprob": q, "unidad": (r["Unidad"] or None),
+                    "cantidad": q, "cantidad_aprob": q, "unidad": unidad,
                     "precio_unit": p, "total": round(q * p, 2),
-                    "estado": r["Estado"], "imagen": None,
+                    "estado": r["Estado"], "imagen": fotos.get(i - 1),
                 })
             cid = db.guardar_cotizacion(cab, lineas_m, archivo_nombre="(manual)")
             st.success(f"Cotización manual guardada (#{cid}) con {len(lineas_m)} productos. Ya está en el tablero.")
