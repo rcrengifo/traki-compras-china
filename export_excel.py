@@ -35,30 +35,32 @@ def generar(cot, lineas):
     # --- titulo ---
     ws.merge_cells("A1:G1")
     t = ws["A1"]
-    t.value = "APPROVED PURCHASE ORDER"
-    t.font = Font(size=16, bold=True, color="FFFFFF")
+    t.value = "ORDEN DE COMPRA APROBADA  /  APPROVED PURCHASE ORDER"
+    t.font = Font(size=14, bold=True, color="FFFFFF")
     t.alignment = Alignment(horizontal="center", vertical="center")
     t.fill = PatternFill("solid", fgColor=NEGRO)
     ws.row_dimensions[1].height = 28
 
-    # --- cabecera ---
+    # --- cabecera (bilingue Espanol / English) ---
     info = [
-        ("Supplier:", cot.get("proveedor") or ""),
-        ("To (Buyer):", cot.get("cliente") or ""),
-        ("Date:", cot.get("fecha_emision") or ""),
+        ("Proveedor / Supplier:", cot.get("proveedor") or ""),
+        ("Cliente / To (Buyer):", cot.get("cliente") or ""),
+        ("Fecha / Date:", cot.get("fecha_emision") or ""),
         ("Incoterm:", cot.get("incoterm") or ""),
     ]
     r = 2
     for etiqueta, valor in info:
+        ws.merge_cells(f"A{r}:B{r}")
         ws[f"A{r}"] = etiqueta
         ws[f"A{r}"].font = Font(bold=True)
-        ws.merge_cells(f"B{r}:G{r}")
-        ws[f"B{r}"] = valor
+        ws.merge_cells(f"C{r}:G{r}")
+        ws[f"C{r}"] = valor
         r += 1
 
-    # --- encabezados de tabla ---
+    # --- encabezados de tabla (bilingue) ---
     hdr_row = r + 1
-    headers = ["No.", "Product Description", "Image", "Approved Qty", "Unit", "Unit Price", "Amount"]
+    headers = ["No.", "Producto / Product", "Imagen / Image", "Cant. aprob. / Approved Qty",
+               "Unidad / Unit", "Precio unit / Unit Price", "Monto / Amount"]
     for j, h in enumerate(headers, start=1):
         c = ws.cell(row=hdr_row, column=j, value=h)
         c.font = Font(bold=True, color="FFFFFF")
