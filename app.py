@@ -3,15 +3,31 @@ Compras China - herramienta de gestion de importaciones.
 App Streamlit. Ejecutar:  streamlit run app.py
 """
 import os
+import base64
 import tempfile
+from functools import lru_cache
 import pandas as pd
 import streamlit as st
 
 import db
+import export_excel
 from parser_cotizacion import leer_cotizacion
 from contenedor import calcular, CONTENEDORES
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+@lru_cache(maxsize=1)
+def logo_uri():
+    """Devuelve el logo Traki como data URI (base64) o None si no existe el archivo."""
+    for nombre in ("traki.png", "logo.png", "traki.jpg", "logo.jpg"):
+        ruta = os.path.join(BASE_DIR, nombre)
+        if os.path.exists(ruta):
+            mime = "image/jpeg" if nombre.endswith(("jpg", "jpeg")) else "image/png"
+            with open(ruta, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            return f"data:{mime};base64,{b64}"
+    return None
 
 st.set_page_config(page_title="Traki · Compras China", page_icon="🛒", layout="wide")
 db.init_db()
@@ -54,9 +70,12 @@ WORDMARK = ('trak<span class="tk-i">&#305;<span class="tk-drop"></span></span>')
 
 
 def header(subtitulo):
+    uri = logo_uri()
+    logo = (f'<img src="{uri}" style="height:52px;border-radius:8px">' if uri
+            else f'<span class="tk-word" style="font-size:38px">{WORDMARK}</span>')
     st.markdown(
         f"""<div class="traki-header">
-              <span class="tk-word" style="font-size:38px">{WORDMARK}</span>
+              {logo}
               <span class="traki-sub">{subtitulo}</span>
             </div>""",
         unsafe_allow_html=True,
@@ -87,10 +106,13 @@ def mostrar_imagen(col, valor):
 # =============================================================================
 # BARRA LATERAL - navegacion
 # =============================================================================
+_logo = logo_uri()
+_logo_html = (f'<img src="{_logo}" style="height:46px;border-radius:8px">' if _logo
+             else f'<span class="tk-word" style="font-size:30px">{WORDMARK}</span>')
 st.sidebar.markdown(
     '<div style="padding:4px 0 10px">'
-    f'<span class="tk-word" style="font-size:30px">{WORDMARK}</span>'
-    '<div style="font-size:12px;font-weight:400;color:#a1a1aa;margin-top:2px">Compras e importaciones</div>'
+    f'{_logo_html}'
+    '<div style="font-size:12px;font-weight:400;color:#a1a1aa;margin-top:4px">Compras e importaciones</div>'
     '</div>', unsafe_allow_html=True)
 seccion = st.sidebar.radio(
     "Menu",
@@ -107,9 +129,60 @@ st.sidebar.caption(f"{len(cots)} cotizaciones guardadas")
 # =============================================================================
 if seccion == "➕ Nueva cotización":
     header("Nueva cotización")
-    st.write("Sube el Excel que manda China. El sistema lee los productos y sus fotos automáticamente.")
+    modo = st.radio(
+        "¿Cómo quieres crearla?",
+        ["📤 Subir Excel de China", "✍️ Crear manual (proveedor de confianza)"],
+        horizontal=True,
+    )
 
-    archivo = st.file_uploader("Archivo de cotización (.xlsx)", type=["xlsx"])
+    archivo = None
+    if modo.startswith("📤"):
+        st.write("Sube el Excel que manda China. El sistema lee los productos y sus fotos automáticamente.")
+        archivo = st.file_uploader("Archivo de cotización (.xlsx)", type=["xlsx"])
+    else:
+        # ------- MODO MANUAL: crear cotización a mano, sin archivo -------
+        st.write("Crea la cotización a mano. Útil cuando ya tienen un proveedor de confianza y van directo a comprar.")
+        c1, c2 = st.columns(2)
+        m_prov = c1.text_input("Proveedor", key="m_prov")
+        m_cli = c2.text_input("Cliente", value="Traki Distribuidora, C.A.", key="m_cli")
+        c3, c4, c5 = st.columns(3)
+        m_fecha = c3.date_input("Fecha", format="YYYY-MM-DD", key="m_fecha")
+        m_inco = c4.selectbox("Incoterm", ["EXW", "FOB", "CIF", "CFR", "DDP"], key="m_inco")
+        m_mon = c5.selectbox("Moneda", ["USD", "CNY"], key="m_mon")
+
+        st.markdown("**Productos** — escribe cada uno y agrega filas con el ➕ de la tabla:")
+        base = pd.DataFrame([{"Producto": "", "Cantidad": 0.0, "Unidad": "pc",
+                              "Precio unit": 0.0, "Estado": "Aprobado"}])
+        editado = st.data_editor(
+            base, num_rows="dynamic", use_container_width=True, hide_index=True,
+            column_config={
+                "Producto": st.column_config.TextColumn(width="large"),
+                "Cantidad": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
+                "Precio unit": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
+                "Estado": st.column_config.SelectboxColumn(options=db.ESTADOS_APROB, default="Aprobado"),
+            }, key="m_editor",
+        )
+        filas = [r for _, r in editado.iterrows() if str(r["Producto"]).strip()]
+        total_m = sum((r["Cantidad"] or 0) * (r["Precio unit"] or 0)
+                      for r in filas if r["Estado"] != "Eliminado")
+        st.metric(f"Total ({m_mon})", f"{total_m:,.2f}")
+
+        if st.button("💾 Guardar cotización manual", type="primary", disabled=not filas):
+            cab = {"proveedor": m_prov or None, "cliente": m_cli or None,
+                   "fecha_emision": m_fecha.isoformat() if m_fecha else None,
+                   "incoterm": m_inco, "moneda": m_mon}
+            lineas_m = []
+            for i, r in enumerate(filas, start=1):
+                q = float(r["Cantidad"] or 0)
+                p = float(r["Precio unit"] or 0)
+                lineas_m.append({
+                    "sn": i, "descripcion": str(r["Producto"]).strip(),
+                    "cantidad": q, "cantidad_aprob": q, "unidad": (r["Unidad"] or None),
+                    "precio_unit": p, "total": round(q * p, 2),
+                    "estado": r["Estado"], "imagen": None,
+                })
+            cid = db.guardar_cotizacion(cab, lineas_m, archivo_nombre="(manual)")
+            st.success(f"Cotización manual guardada (#{cid}) con {len(lineas_m)} productos. Ya está en el tablero.")
 
     if archivo is not None:
         # parsear solo una vez por archivo
@@ -257,6 +330,37 @@ elif seccion == "📋 Tablero de compras":
                         cambios["cantidad_aprob"] = nueva_cant
                     if cambios:
                         db.actualizar_linea(l["id"], cambios)
+                        st.rerun()
+
+            # --- acciones de la cotización: descargar aprobados / eliminar ---
+            st.markdown("---")
+            n_aprob = sum(1 for l in lineas if l["estado"] == "Aprobado")
+            cbaja, cborra = st.columns([2, 1])
+            with cbaja:
+                if n_aprob:
+                    xlsx = export_excel.generar(co, lineas)
+                    st.download_button(
+                        f"⬇️ Descargar aprobados para China ({n_aprob})",
+                        data=xlsx,
+                        file_name=f"OC_aprobada_{co['id']}_{(co.get('proveedor') or 'proveedor')[:20]}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_{co['id']}", type="primary",
+                    )
+                else:
+                    st.caption("Aprueba productos para poder descargar la orden.")
+            with cborra:
+                if not st.session_state.get(f"del_{co['id']}"):
+                    if st.button("🗑️ Eliminar", key=f"delbtn_{co['id']}"):
+                        st.session_state[f"del_{co['id']}"] = True
+                        st.rerun()
+                else:
+                    st.warning("¿Eliminar esta cotización completa?")
+                    if st.button("Sí, eliminar", key=f"delyes_{co['id']}", type="primary"):
+                        db.eliminar_cotizacion(co["id"])
+                        st.session_state.pop(f"del_{co['id']}", None)
+                        st.rerun()
+                    if st.button("Cancelar", key=f"delno_{co['id']}"):
+                        st.session_state.pop(f"del_{co['id']}", None)
                         st.rerun()
 
 

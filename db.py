@@ -143,6 +143,13 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
         return cot_id
 
 
+def eliminar_cotizacion(cotizacion_id):
+    """Borra la cotizacion y todas sus lineas (incluye sus fotos)."""
+    with engine().begin() as cx:
+        cx.execute(lineas.delete().where(lineas.c.cotizacion_id == cotizacion_id))
+        cx.execute(cotizaciones.delete().where(cotizaciones.c.id == cotizacion_id))
+
+
 def listar_cotizaciones():
     with engine().connect() as cx:
         rows = cx.execute(text("""
