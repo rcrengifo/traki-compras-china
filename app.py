@@ -206,7 +206,26 @@ if seccion == "➕ Nueva cotización":
                     "estado": r["Estado"], "imagen": fotos.get(i - 1),
                 })
             cid = db.guardar_cotizacion(cab, lineas_m, archivo_nombre="(manual)")
-            st.success(f"Cotización manual guardada (#{cid}) con {len(lineas_m)} productos. Ya está en el tablero.")
+            st.session_state["_ult_manual"] = cid
+
+        # tras guardar: mostrar confirmación + botón de descarga (persiste entre reruns)
+        if st.session_state.get("_ult_manual"):
+            mid = st.session_state["_ult_manual"]
+            mls = db.get_lineas(mid)
+            mcot = next((c for c in db.listar_cotizaciones() if c["id"] == mid), None)
+            if mls and mcot:
+                st.success(f"Cotización manual #{mid} guardada. Ya está en el Tablero.")
+                if any(l["estado"] == "Aprobado" for l in mls):
+                    st.download_button(
+                        "⬇️ Descargar esta cotización para China",
+                        data=export_excel.generar(mcot, mls),
+                        file_name=f"OC_manual_{mid}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dlman_{mid}", type="primary",
+                    )
+                if st.button("➕ Crear otra cotización", key="nueva_manual"):
+                    st.session_state.pop("_ult_manual", None)
+                    st.rerun()
 
     if archivo is not None:
         # parsear solo una vez por archivo
