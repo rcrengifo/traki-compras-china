@@ -27,8 +27,8 @@ Sin configuración usa una base SQLite local (`compras.db`). Es solo para prueba
 
 1. Sube este proyecto a un repo de GitHub.
 2. En share.streamlit.io → **New app** → elige el repo y `app.py`.
-3. En **Advanced settings → Secrets** pega:
+3. En **Advanced settings → Secrets** pega (puerto **6543** + `?sslmode=require`):
    ```toml
-   DATABASE_URL = "postgresql://postgres:TU-PASSWORD@db.xxxx.supabase.co:5432/postgres"
+   DATABASE_URL = "postgresql://postgres.[REF]:TU-PASSWORD@aws-0-[REGION].pooler.supabase.com:6543/postgres?sslmode=require"
    ```
 4. Deploy. Para que sea privada: **Settings → Sharing** → solo el correo de tu esposa.
