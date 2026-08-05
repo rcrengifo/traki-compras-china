@@ -1,0 +1,17 @@
+# base de datos local (no subir datos ni la BD de prueba)
+compras.db
+*.db
+
+# secretos (NUNCA subir credenciales)
+.streamlit/secrets.toml
+
+# imagenes/carpetas temporales
+media/
+media_test/
+senmao_imgs/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
