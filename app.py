@@ -34,19 +34,29 @@ st.markdown(f"""
   .traki-header {{
      background:#000; border-radius:14px; padding:16px 22px; margin-bottom:14px;
      display:flex; align-items:center; gap:14px; }}
-  .traki-word {{ font-size:34px; font-weight:800; color:#fff; letter-spacing:-1px;
-     font-family:'Segoe UI',sans-serif; line-height:1; }}
-  .traki-dot {{ color:{TRAKI_ROJO}; }}
+  /* logotipo "traki" con la gota roja sobre la i */
+  .tk-word {{ font-weight:800; color:#fff; letter-spacing:-.045em; line-height:1;
+     font-family:'Arial Rounded MT Bold','Segoe UI',Arial,sans-serif;
+     display:inline-block; white-space:nowrap; }}
+  .tk-i {{ position:relative; display:inline-block; }}
+  .tk-drop {{ position:absolute; left:50%; top:.05em;
+     width:.34em; height:.34em; background:{TRAKI_ROJO};
+     border-radius:0 50% 50% 50%;
+     transform:translateX(-50%) rotate(45deg); }}
   .traki-sub {{ color:#d4d4d8; font-size:15px; border-left:2px solid {TRAKI_ROJO};
      padding-left:12px; margin-left:4px; }}
 </style>
 """, unsafe_allow_html=True)
 
 
+# marca de palabra reutilizable: "traki" con la i sin punto + gota roja
+WORDMARK = ('trak<span class="tk-i">&#305;<span class="tk-drop"></span></span>')
+
+
 def header(subtitulo):
     st.markdown(
         f"""<div class="traki-header">
-              <span class="traki-word">trak<span class="traki-dot">i</span></span>
+              <span class="tk-word" style="font-size:38px">{WORDMARK}</span>
               <span class="traki-sub">{subtitulo}</span>
             </div>""",
         unsafe_allow_html=True,
@@ -54,7 +64,7 @@ def header(subtitulo):
 
 
 # color por estado de aprobacion
-COLOR_ESTADO = {"Pendiente": "🟡", "Aprobado": "🟢", "Quitado": "🔴"}
+COLOR_ESTADO = {"Pendiente": "🟡", "Aprobado": "🟢", "Eliminado": "🔴"}
 COLOR_ETAPA = {
     "Sin ordenar": "⚪", "Ordenado": "🟠", "En importacion": "🔵",
     "En transito": "🟣", "En aduana": "🟤", "Recibido": "🟢",
@@ -78,9 +88,9 @@ def mostrar_imagen(col, valor):
 # BARRA LATERAL - navegacion
 # =============================================================================
 st.sidebar.markdown(
-    '<div style="font-size:26px;font-weight:800;letter-spacing:-1px;padding:4px 0 10px">'
-    'trak<span style="color:#E30613">i</span>'
-    '<div style="font-size:12px;font-weight:400;color:#a1a1aa">Compras e importaciones</div>'
+    '<div style="padding:4px 0 10px">'
+    f'<span class="tk-word" style="font-size:30px">{WORDMARK}</span>'
+    '<div style="font-size:12px;font-weight:400;color:#a1a1aa;margin-top:2px">Compras e importaciones</div>'
     '</div>', unsafe_allow_html=True)
 seccion = st.sidebar.radio(
     "Menu",
@@ -130,7 +140,7 @@ if seccion == "➕ Nueva cotización":
 
         st.markdown("---")
         st.subheader(f"Productos ({len(lineas)}) — decide cuáles aprobar")
-        st.caption("El jefe aprueba, quita o deja pendiente cada producto.")
+        st.caption("El jefe aprueba, elimina o deja pendiente cada producto. Si aprueba, puedes ajustar cuántas piezas.")
 
         # --- productos, uno por fila con foto ---
         for i, l in enumerate(lineas):
@@ -154,23 +164,36 @@ if seccion == "➕ Nueva cotización":
                     index=db.ESTADOS_APROB.index(st.session_state["_estados"].get(i, "Pendiente")),
                     key=f"est_{i}", horizontal=False,
                 )
+                cant_cot = l.get("cantidad") or 0
+                if st.session_state["_estados"][i] == "Aprobado":
+                    st.number_input(
+                        f"Cantidad aprobada (de {cant_cot:g})", min_value=0.0,
+                        value=float(cant_cot), step=1.0, key=f"cant_{i}",
+                    )
             st.markdown("<hr style='margin:4px 0;border:0;border-top:1px solid #eee'>", unsafe_allow_html=True)
 
         # --- resumen y guardar ---
+        def _cant_aprob(i):
+            """cantidad aprobada elegida (o la cotizada si no se tocó)."""
+            if st.session_state["_estados"][i] == "Aprobado":
+                return st.session_state.get(f"cant_{i}", lineas[i].get("cantidad") or 0)
+            return lineas[i].get("cantidad")
+
         aprob = sum(1 for i in range(len(lineas)) if st.session_state["_estados"][i] == "Aprobado")
-        quit_ = sum(1 for i in range(len(lineas)) if st.session_state["_estados"][i] == "Quitado")
+        elim = sum(1 for i in range(len(lineas)) if st.session_state["_estados"][i] == "Eliminado")
         total_aprob = sum(
-            (lineas[i].get("total") or 0)
+            (_cant_aprob(i) or 0) * (lineas[i].get("precio_unit") or 0)
             for i in range(len(lineas)) if st.session_state["_estados"][i] == "Aprobado"
         )
         cA, cB, cC = st.columns(3)
         cA.metric("Aprobados", aprob)
-        cB.metric("Quitados", quit_)
+        cB.metric("Eliminados", elim)
         cC.metric(f"Total aprobado ({cab.get('moneda') or ''})", f"{total_aprob:,.2f}")
 
         if st.button("💾 Guardar cotización", type="primary"):
             for i in range(len(lineas)):
                 lineas[i]["estado"] = st.session_state["_estados"][i]
+                lineas[i]["cantidad_aprob"] = _cant_aprob(i)
             cot_id = db.guardar_cotizacion(cab, lineas, archivo_nombre=archivo.name)
             st.success(f"Cotización guardada (#{cot_id}). Los productos aprobados ya están en el tablero.")
             for k in ("_data", "_archivo_cargado", "_estados"):
@@ -193,9 +216,20 @@ elif seccion == "📋 Tablero de compras":
             for l in lineas:
                 cimg, cinfo, cacc = st.columns([1, 3, 2])
                 mostrar_imagen(cimg, l.get("imagen"))
+                cant = l.get("cantidad")
+                ca = l.get("cantidad_aprob")
                 with cinfo:
                     st.markdown(f"{COLOR_ESTADO.get(l['estado'],'')} **{l['descripcion'].splitlines()[0]}**")
-                    st.caption(f"{l.get('cantidad') or '—'} {l.get('unidad') or ''} · Total {l.get('total') or '—'}")
+                    linea_txt = f"{cant or '—'} {l.get('unidad') or ''}"
+                    if l["estado"] == "Aprobado" and ca is not None and ca != cant:
+                        linea_txt += f"  ·  ✅ aprobadas: **{ca:g}** de {cant:g}"
+                    precio = l.get("precio_unit") or 0
+                    qeff = ca if (l["estado"] == "Aprobado" and ca is not None) else (cant or 0)
+                    if precio:
+                        linea_txt += f"  ·  Total {qeff * precio:,.2f}"
+                    elif l.get("total") is not None:
+                        linea_txt += f"  ·  Total {l.get('total')}"
+                    st.caption(linea_txt)
                 with cacc:
                     nuevo_estado = st.selectbox(
                         "Aprobación", db.ESTADOS_APROB,
@@ -207,8 +241,22 @@ elif seccion == "📋 Tablero de compras":
                         index=db.ETAPAS.index(l["etapa"]) if l.get("etapa") in db.ETAPAS else 0,
                         key=f"tb_eta_{l['id']}",
                     )
-                    if nuevo_estado != l["estado"] or nueva_etapa != l.get("etapa"):
-                        db.actualizar_linea(l["id"], {"estado": nuevo_estado, "etapa": nueva_etapa})
+                    nueva_cant = ca
+                    if nuevo_estado == "Aprobado":
+                        nueva_cant = st.number_input(
+                            "Cant. aprobada", min_value=0.0,
+                            value=float(ca if ca is not None else (cant or 0)),
+                            step=1.0, key=f"tb_cant_{l['id']}",
+                        )
+                    cambios = {}
+                    if nuevo_estado != l["estado"]:
+                        cambios["estado"] = nuevo_estado
+                    if nueva_etapa != l.get("etapa"):
+                        cambios["etapa"] = nueva_etapa
+                    if nuevo_estado == "Aprobado" and nueva_cant != ca:
+                        cambios["cantidad_aprob"] = nueva_cant
+                    if cambios:
+                        db.actualizar_linea(l["id"], cambios)
                         st.rerun()
 
 
@@ -230,11 +278,13 @@ elif seccion == "🔎 Buscar":
         fecha_hasta=fhasta.isoformat() if fhasta else None,
         estado=estado,
     )
-    st.metric("Total de unidades encontradas", f"{total_cant:,.0f}", help="Suma de las cantidades de todas las líneas encontradas")
+    st.metric("Total de unidades", f"{total_cant:,.0f}",
+              help="Suma de las cantidades (usa la cantidad aprobada cuando el producto está aprobado)")
     if filas:
         df = pd.DataFrame([{
             "Producto": f["descripcion"].splitlines()[0],
-            "Cantidad": f.get("cantidad"),
+            "Cotizada": f.get("cantidad"),
+            "Aprobada": f.get("cant_efectiva") if f.get("estado") == "Aprobado" else None,
             "Unidad": f.get("unidad"),
             "Estado": f.get("estado"),
             "Etapa": f.get("etapa"),

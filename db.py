@@ -18,7 +18,7 @@ from sqlalchemy import (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-ESTADOS_APROB = ["Pendiente", "Aprobado", "Quitado"]
+ESTADOS_APROB = ["Pendiente", "Aprobado", "Eliminado"]
 ETAPAS = [
     "Sin ordenar", "Ordenado", "En importacion",
     "En transito", "En aduana", "Recibido",
@@ -60,7 +60,7 @@ lineas = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("cotizacion_id", Integer, ForeignKey("cotizaciones.id", ondelete="CASCADE")),
     Column("sn", Text), Column("descripcion", Text), Column("categoria", Text),
-    Column("cantidad", Float), Column("unidad", Text),
+    Column("cantidad", Float), Column("cantidad_aprob", Float), Column("unidad", Text),
     Column("precio_unit", Float), Column("total", Float),
     Column("imagen", LargeBinary),        # bytes de la foto (o None)
     Column("estado", Text, default="Pendiente"),
@@ -83,6 +83,21 @@ def engine():
 
 def init_db():
     _metadata.create_all(engine())
+    _asegurar_columnas()
+
+
+def _asegurar_columnas():
+    """Agrega columnas nuevas a tablas ya existentes (migracion simple e idempotente).
+    Necesario porque create_all no altera tablas que ya existen (p.ej. en Supabase)."""
+    from sqlalchemy import inspect
+    nuevas = {"lineas": {"cantidad_aprob": "FLOAT"}}
+    insp = inspect(engine())
+    with engine().begin() as cx:
+        for tabla, cols in nuevas.items():
+            existentes = {c["name"] for c in insp.get_columns(tabla)}
+            for col, tipo in cols.items():
+                if col not in existentes:
+                    cx.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {col} {tipo}"))
 
 
 def _row_imagen_a_bytes(src):
@@ -99,7 +114,7 @@ def _row_imagen_a_bytes(src):
 
 def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
     ahora = datetime.now().isoformat(timespec="seconds")
-    total = sum((l.get("total") or 0) for l in filas if l.get("estado", "Pendiente") != "Quitado")
+    total = sum((l.get("total") or 0) for l in filas if l.get("estado", "Pendiente") != "Eliminado")
     with engine().begin() as cx:
         res = cx.execute(cotizaciones.insert().values(
             proveedor=cabecera.get("proveedor"), contacto=cabecera.get("contacto"),
@@ -112,10 +127,14 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
         ))
         cot_id = res.inserted_primary_key[0]
         for l in filas:
+            cant = l.get("cantidad")
+            cant_aprob = l.get("cantidad_aprob")
+            if cant_aprob is None:
+                cant_aprob = cant
             cx.execute(lineas.insert().values(
                 cotizacion_id=cot_id, sn=str(l.get("sn", "")),
                 descripcion=l.get("descripcion"), categoria=l.get("categoria"),
-                cantidad=l.get("cantidad"), unidad=l.get("unidad"),
+                cantidad=cant, cantidad_aprob=cant_aprob, unidad=l.get("unidad"),
                 precio_unit=l.get("precio_unit"), total=l.get("total"),
                 imagen=_row_imagen_a_bytes(l.get("imagen")),
                 estado=l.get("estado", "Pendiente"), nota=l.get("nota"),
@@ -145,7 +164,7 @@ def get_lineas(cotizacion_id):
 
 def actualizar_linea(linea_id, campos):
     permitidas = {
-        "estado", "nota", "categoria", "cantidad", "precio_unit", "total",
+        "estado", "nota", "categoria", "cantidad", "cantidad_aprob", "precio_unit", "total",
         "etapa", "guia", "contenedor", "tracking_num", "eta",
         "fecha_pedido", "fecha_recibido", "descripcion", "unidad",
     }
@@ -181,7 +200,14 @@ def buscar(texto_q="", fecha_desde=None, fecha_hasta=None, estado=None, etapa=No
     q += " ORDER BY l.id DESC"
     with engine().connect() as cx:
         rows = [dict(r) for r in cx.execute(text(q), params).mappings().all()]
-    total_cant = sum((r.get("cantidad") or 0) for r in rows)
+    # cantidad efectiva: si esta aprobado usa la cantidad aprobada; si no, la cotizada
+    def _efectiva(r):
+        if r.get("estado") == "Aprobado" and r.get("cantidad_aprob") is not None:
+            return r["cantidad_aprob"]
+        return r.get("cantidad") or 0
+    for r in rows:
+        r["cant_efectiva"] = _efectiva(r)
+    total_cant = sum((_efectiva(r) or 0) for r in rows)
     return rows, total_cant
 
 
