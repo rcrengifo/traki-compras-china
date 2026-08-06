@@ -12,6 +12,7 @@ import streamlit as st
 import db
 import export_excel
 from parser_cotizacion import leer_cotizacion
+from parser_pdf import leer_cotizacion_pdf
 from contenedor import calcular, CONTENEDORES
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -137,8 +138,8 @@ if seccion == "➕ Nueva cotización":
 
     archivo = None
     if modo.startswith("📤"):
-        st.write("Sube el Excel que manda China. El sistema lee los productos y sus fotos automáticamente.")
-        archivo = st.file_uploader("Archivo de cotización (.xlsx)", type=["xlsx"])
+        st.write("Sube la cotización que manda China (**Excel o PDF**). El sistema lee los productos y sus fotos automáticamente.")
+        archivo = st.file_uploader("Archivo de cotización (.xlsx o .pdf)", type=["xlsx", "pdf"])
     else:
         # ------- MODO MANUAL: crear cotización a mano, sin archivo -------
         st.write("Crea la cotización a mano. Útil cuando ya tienen un proveedor de confianza y van directo a comprar.")
@@ -235,7 +236,10 @@ if seccion == "➕ Nueva cotización":
             with open(ruta_tmp, "wb") as f:
                 f.write(archivo.getbuffer())
             img_dir = os.path.join(tmpdir, "img")
-            data = leer_cotizacion(ruta_tmp, carpeta_imagenes=img_dir)
+            if archivo.name.lower().endswith(".pdf"):
+                data = leer_cotizacion_pdf(ruta_tmp, carpeta_imagenes=img_dir)
+            else:
+                data = leer_cotizacion(ruta_tmp, carpeta_imagenes=img_dir)
             st.session_state["_data"] = data
             st.session_state["_archivo_cargado"] = archivo.name
             # estado inicial por linea
