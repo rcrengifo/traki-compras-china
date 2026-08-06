@@ -139,7 +139,7 @@ if seccion == "➕ Nueva cotización":
     archivo = None
     if modo.startswith("📤"):
         st.write("Sube la cotización que manda China (**Excel o PDF**). El sistema lee los productos y sus fotos automáticamente.")
-        archivo = st.file_uploader("Archivo de cotización (.xlsx o .pdf)", type=["xlsx", "pdf"])
+        archivo = st.file_uploader("Archivo de cotización (.xlsx, .xls o .pdf)", type=["xlsx", "xls", "pdf"])
     else:
         # ------- MODO MANUAL: crear cotización a mano, sin archivo -------
         st.write("Crea la cotización a mano. Útil cuando ya tienen un proveedor de confianza y van directo a comprar.")

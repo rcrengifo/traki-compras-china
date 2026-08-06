@@ -111,11 +111,12 @@ def extraer_imagenes(ruta_xlsx, carpeta_destino, prefijo="img"):
 # encabezados de columna que reconocemos (normalizados)
 COLS = {
     "sn":          ["s/n", "sn", "no", "no.", "item", "#"],
-    "descripcion": ["product description", "description", "descripcion", "producto"],
+    "descripcion": ["product description", "description", "descripcion", "producto", "products", "product", "item description"],
     "imagen":      ["image", "imagen", "picture", "foto"],
     "cantidad":    ["quantity", "qty", "cantidad"],
-    "unidad":      ["unit", "unidad"],
+    # precio_unit ANTES que unidad: "unit price" contiene "unit", asi gana el precio
     "precio_unit": ["unit price", "unit price(exw)", "precio unit", "precio unitario", "price"],
+    "unidad":      ["unit", "unidad"],
     "total":       ["total amount", "total", "amount", "monto"],
 }
 
@@ -221,6 +222,25 @@ def _extraer_cabecera(rows):
     elif "rmb" in texto or "cny" in texto or "¥" in texto:
         cab["moneda"] = "CNY"
 
+    # respaldo de proveedor: si no vino etiquetado, usar el nombre de la 1a linea
+    if not cab["proveedor"]:
+        for r in rows[:4]:
+            for c in r:
+                if not c:
+                    continue
+                s = re.sub(r"\s+", " ", str(c)).strip()
+                n = s.lower()
+                if len(s) < 4:
+                    continue
+                if any(k in n for k in ("quotation", "cotizaci", "invoice", "proforma", "packing", "purchase order")):
+                    continue
+                if re.match(r"(to|add|date|tel|attn|from|consignee|dear)\b", n):
+                    continue
+                cab["proveedor"] = s.strip(" .,-")
+                break
+            if cab["proveedor"]:
+                break
+
     # referencia / N° de cotizacion (texto sin bajar a minusculas, para preservar el codigo)
     texto_ref = " \n ".join(str(c) for r in rows[:25] for c in r if c is not None)
     cab["referencia"] = _buscar_referencia(texto_ref)
@@ -232,13 +252,38 @@ def leer_cotizacion(ruta_xlsx, carpeta_imagenes=None):
     Lee una cotizacion y devuelve dict con 'cabecera' y 'lineas'.
     Cada linea puede incluir 'imagen' (ruta al archivo extraido).
     """
+    ext = os.path.splitext(ruta_xlsx)[1].lower()
+    if ext == ".xls":
+        return _leer_xls(ruta_xlsx)
+
     wb = openpyxl.load_workbook(ruta_xlsx, data_only=True)
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
 
+    imgs = {}
+    if carpeta_imagenes:
+        try:
+            imgs = extraer_imagenes(ruta_xlsx, carpeta_imagenes)
+        except Exception:  # noqa: BLE001
+            imgs = {}
+    return _parsear_grid(rows, imgs)
+
+
+def _leer_xls(ruta):
+    """Lee un .xls (Excel 97-2003) con xlrd. El formato viejo no expone las
+    imagenes facilmente, asi que van sin foto (se pueden subir a mano)."""
+    import xlrd
+    wb = xlrd.open_workbook(ruta)
+    ws = wb.sheet_by_index(0)
+    rows = [tuple(ws.cell_value(i, j) for j in range(ws.ncols)) for i in range(ws.nrows)]
+    return _parsear_grid(rows, {})
+
+
+def _parsear_grid(rows, imgs):
+    """Extrae cabecera y lineas de un grid de celdas. Compartido por .xlsx y .xls.
+    imgs: dict {fila_excel(1-index): ruta_imagen}."""
     cabecera = _extraer_cabecera(rows)
 
-    # localizar la fila de encabezados de la tabla
     fila_hdr = None
     mapa = {}
     for i, r in enumerate(rows):
@@ -249,29 +294,23 @@ def leer_cotizacion(ruta_xlsx, carpeta_imagenes=None):
     if fila_hdr is None:
         return {"cabecera": cabecera, "lineas": [], "advertencia": "No se encontro la tabla de productos"}
 
-    # imagenes por fila de excel
-    imgs = {}
-    if carpeta_imagenes:
-        try:
-            imgs = extraer_imagenes(ruta_xlsx, carpeta_imagenes)
-        except Exception as e:  # noqa: BLE001
-            imgs = {}
-            cabecera["_img_error"] = str(e)
-
     lineas = []
     for i in range(fila_hdr + 1, len(rows)):
         r = rows[i]
         desc = r[mapa["descripcion"]] if mapa.get("descripcion") is not None and mapa["descripcion"] < len(r) else None
         desc = None if desc is None else str(desc).strip()
         # cortar en filas de totales / notas al pie
-        if desc and re.match(r"^(exw total|total amount|\d+\.\s|lead time|payment|transportation|package)", _norm(desc)):
+        if desc and re.match(r"^(total\b|exw total|amount|\d+\.\s|lead\s*time|payment|transportation|package)", _norm(desc)):
             break
         cantidad = _num(r[mapa["cantidad"]]) if mapa.get("cantidad") is not None and mapa["cantidad"] < len(r) else None
         if not desc and cantidad is None:
             continue
-        fila_excel = i + 1  # iter_rows es 0-index -> excel 1-index
+        fila_excel = i + 1  # 0-index -> excel 1-index
+        sn = r[mapa["sn"]] if mapa.get("sn") is not None and mapa["sn"] < len(r) and r[mapa["sn"]] not in (None, "") else len(lineas) + 1
+        if isinstance(sn, float) and sn.is_integer():
+            sn = int(sn)
         lineas.append({
-            "sn":          r[mapa["sn"]] if mapa.get("sn") is not None and mapa["sn"] < len(r) else len(lineas) + 1,
+            "sn":          sn,
             "descripcion": desc or "",
             "cantidad":    cantidad,
             "unidad":      (str(r[mapa["unidad"]]).strip() if mapa.get("unidad") is not None and mapa["unidad"] < len(r) and r[mapa["unidad"]] else None),
