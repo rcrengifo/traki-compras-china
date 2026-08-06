@@ -48,6 +48,7 @@ _metadata = MetaData()
 cotizaciones = Table(
     "cotizaciones", _metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("referencia", Text),
     Column("proveedor", Text), Column("contacto", Text), Column("email", Text),
     Column("whatsapp", Text), Column("cliente", Text), Column("fecha_emision", Text),
     Column("incoterm", Text), Column("moneda", Text), Column("lead_time", Text),
@@ -90,7 +91,8 @@ def _asegurar_columnas():
     """Agrega columnas nuevas a tablas ya existentes (migracion simple e idempotente).
     Necesario porque create_all no altera tablas que ya existen (p.ej. en Supabase)."""
     from sqlalchemy import inspect
-    nuevas = {"lineas": {"cantidad_aprob": "FLOAT"}}
+    nuevas = {"lineas": {"cantidad_aprob": "FLOAT"},
+              "cotizaciones": {"referencia": "TEXT"}}
     insp = inspect(engine())
     with engine().begin() as cx:
         for tabla, cols in nuevas.items():
@@ -117,6 +119,7 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
     total = sum((l.get("total") or 0) for l in filas if l.get("estado", "Pendiente") != "Eliminado")
     with engine().begin() as cx:
         res = cx.execute(cotizaciones.insert().values(
+            referencia=cabecera.get("referencia"),
             proveedor=cabecera.get("proveedor"), contacto=cabecera.get("contacto"),
             email=cabecera.get("email"), whatsapp=cabecera.get("whatsapp"),
             cliente=cabecera.get("cliente"), fecha_emision=cabecera.get("fecha_emision"),

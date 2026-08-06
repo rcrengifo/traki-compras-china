@@ -150,6 +150,7 @@ if seccion == "➕ Nueva cotización":
         m_fecha = c3.date_input("Fecha", format="YYYY-MM-DD", key="m_fecha")
         m_inco = c4.selectbox("Incoterm", ["EXW", "FOB", "CIF", "CFR", "DDP"], key="m_inco")
         m_mon = c5.selectbox("Moneda", ["USD", "CNY"], key="m_mon")
+        m_ref = st.text_input("N° de cotización / referencia (opcional)", key="m_ref")
 
         st.markdown("**Productos** — escribe cada uno y agrega filas con el ➕ de la tabla:")
         UNIDADES = ["pc", "set", "pair", "kg", "g", "ton", "m", "meters", "cm",
@@ -192,7 +193,8 @@ if seccion == "➕ Nueva cotización":
         st.metric(f"Total ({m_mon})", f"{total_m:,.2f}")
 
         if st.button("💾 Guardar cotización manual", type="primary", disabled=not filas):
-            cab = {"proveedor": m_prov or None, "cliente": m_cli or None,
+            cab = {"referencia": (m_ref.strip() or None), "proveedor": m_prov or None,
+                   "cliente": m_cli or None,
                    "fecha_emision": m_fecha.isoformat() if m_fecha else None,
                    "incoterm": m_inco, "moneda": m_mon}
             lineas_m = []
@@ -255,6 +257,13 @@ if seccion == "➕ Nueva cotización":
         c1.metric("Proveedor", cab.get("proveedor") or "—")
         c2.metric("Cliente", cab.get("cliente") or "—")
         c3.metric("Incoterm", cab.get("incoterm") or "—")
+        ref_val = st.text_input(
+            "N° de cotización / referencia",
+            value=cab.get("referencia") or "",
+            help="Detectado del archivo (ej: PO). Puedes corregirlo o escribirlo si no vino.",
+            key=f"ref_{st.session_state.get('_archivo_cargado','')}",
+        )
+        cab["referencia"] = ref_val.strip() or None
         with st.expander("Ver todos los datos de la cotización"):
             st.write({k: v for k, v in cab.items() if v and not k.startswith("_")})
 
@@ -328,7 +337,8 @@ elif seccion == "📋 Tablero de compras":
     if not cots:
         st.info("Aún no hay cotizaciones. Sube una en «Nueva cotización».")
     for co in cots:
-        titulo = f"#{co['id']} · {co.get('proveedor') or 'Proveedor?'} · {co.get('fecha_emision') or ''} · {co['n_aprob']}/{co['n_lineas']} aprobados"
+        ref_txt = f"Ref {co['referencia']} · " if co.get("referencia") else ""
+        titulo = f"#{co['id']} · {ref_txt}{co.get('proveedor') or 'Proveedor?'} · {co.get('fecha_emision') or ''} · {co['n_aprob']}/{co['n_lineas']} aprobados"
         with st.expander(titulo):
             m = f"Incoterm {co.get('incoterm') or '—'} · Total EXW {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''}"
             st.caption(m)

@@ -27,6 +27,28 @@ def _norm(texto):
     return re.sub(r"\s+", " ", t).strip().lower()
 
 
+# el código capturado debe contener al menos un dígito (evita falsos positivos como "Quotation Sheet")
+_COD = r"((?=[\w\-/]*\d)[A-Za-z0-9][\w\-/]{2,})"
+_REF_PATRONES = [
+    r"\bP\.?\s*O\.?\s*(?:no|number)?\.?\s*[:：#]?\s*" + _COD,
+    r"\b(?:quotation|quote|cotizaci[oó]n)\s*(?:no|number|n[°º]|#)?\.?\s*[:：#]?\s*" + _COD,
+    r"\bref(?:erence|erencia)?\.?\s*(?:no)?\.?\s*[:：#]?\s*" + _COD,
+    r"\border\s*(?:no)?\.?\s*[:：#]?\s*" + _COD,
+    r"\bN[°º]\s*[:：#]?\s*" + _COD,
+]
+
+
+def _buscar_referencia(texto):
+    """Busca un número de referencia / PO / cotización en el texto. None si no hay."""
+    if not texto:
+        return None
+    for pat in _REF_PATRONES:
+        m = re.search(pat, texto, re.I)
+        if m:
+            return m.group(1).strip(" .,-")
+    return None
+
+
 def _num(v):
     """Convierte a numero si se puede, si no devuelve None."""
     if v is None:
@@ -121,6 +143,7 @@ def _extraer_cabecera(rows):
     confundir, p.ej., el "to" dentro de la palabra "Town".
     """
     cab = {
+        "referencia": None,
         "proveedor": None, "contacto": None, "email": None, "whatsapp": None,
         "cliente": None, "fecha_emision": None, "incoterm": None, "moneda": None,
         "lead_time": None, "forma_pago": None, "transporte": None, "empaque": None,
@@ -197,6 +220,10 @@ def _extraer_cabecera(rows):
         cab["moneda"] = "USD"
     elif "rmb" in texto or "cny" in texto or "¥" in texto:
         cab["moneda"] = "CNY"
+
+    # referencia / N° de cotizacion (texto sin bajar a minusculas, para preservar el codigo)
+    texto_ref = " \n ".join(str(c) for r in rows[:25] for c in r if c is not None)
+    cab["referencia"] = _buscar_referencia(texto_ref)
     return cab
 
 

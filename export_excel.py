@@ -43,6 +43,7 @@ def generar(cot, lineas):
 
     # --- cabecera (bilingue Espanol / English) ---
     info = [
+        ("Ref. / Quote No:", cot.get("referencia") or ""),
         ("Proveedor / Supplier:", cot.get("proveedor") or ""),
         ("Cliente / To (Buyer):", cot.get("cliente") or ""),
         ("Fecha / Date:", cot.get("fecha_emision") or ""),

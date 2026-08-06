@@ -11,13 +11,14 @@ import re
 import pdfplumber
 from PIL import Image
 
-from parser_cotizacion import _norm, _num
+from parser_cotizacion import _norm, _num, _buscar_referencia
 
 
 # ----- cabecera --------------------------------------------------------------
 
 def _extraer_cabecera_pdf(texto):
     cab = {
+        "referencia": None,
         "proveedor": None, "contacto": None, "email": None, "whatsapp": None,
         "cliente": None, "fecha_emision": None, "incoterm": None, "moneda": None,
         "lead_time": None, "forma_pago": None, "transporte": None, "empaque": None,
@@ -36,6 +37,8 @@ def _extraer_cabecera_pdf(texto):
         m = re.search(r"([^\s:：]+@[^\s]+)", s)
         if m and not cab["email"]:
             cab["email"] = m.group(1)
+
+    cab["referencia"] = _buscar_referencia(texto)
 
     low = texto.lower()
     for inc in ("exw", "fob", "cif", "cfr", "ddp", "dap"):
