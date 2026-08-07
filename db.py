@@ -19,6 +19,9 @@ from sqlalchemy import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ESTADOS_APROB = ["Pendiente", "Aprobado", "Eliminado"]
+# etapa de TODO el pedido (nivel cotizacion) — flujo simple que avanza la esposa
+ETAPAS_PEDIDO = ["Solicitud", "Cotizado", "Aprobado", "Comprado", "Recibido"]
+# etapas por linea (se conserva en DB, ya no se usa en la UI)
 ETAPAS = [
     "Sin ordenar", "Ordenado", "En importacion",
     "En transito", "En aduana", "Recibido",
@@ -49,6 +52,7 @@ cotizaciones = Table(
     "cotizaciones", _metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("referencia", Text),
+    Column("etapa_pedido", Text),
     Column("proveedor", Text), Column("contacto", Text), Column("email", Text),
     Column("whatsapp", Text), Column("cliente", Text), Column("fecha_emision", Text),
     Column("incoterm", Text), Column("moneda", Text), Column("lead_time", Text),
@@ -92,7 +96,7 @@ def _asegurar_columnas():
     Necesario porque create_all no altera tablas que ya existen (p.ej. en Supabase)."""
     from sqlalchemy import inspect
     nuevas = {"lineas": {"cantidad_aprob": "FLOAT"},
-              "cotizaciones": {"referencia": "TEXT"}}
+              "cotizaciones": {"referencia": "TEXT", "etapa_pedido": "TEXT"}}
     insp = inspect(engine())
     with engine().begin() as cx:
         for tabla, cols in nuevas.items():
@@ -120,6 +124,7 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
     with engine().begin() as cx:
         res = cx.execute(cotizaciones.insert().values(
             referencia=cabecera.get("referencia"),
+            etapa_pedido=cabecera.get("etapa_pedido") or "Cotizado",
             proveedor=cabecera.get("proveedor"), contacto=cabecera.get("contacto"),
             email=cabecera.get("email"), whatsapp=cabecera.get("whatsapp"),
             cliente=cabecera.get("cliente"), fecha_emision=cabecera.get("fecha_emision"),
@@ -144,6 +149,17 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
                 etapa="Sin ordenar", creado_en=ahora,
             ))
         return cot_id
+
+
+def actualizar_cotizacion(cotizacion_id, campos):
+    """Actualiza campos de cabecera (p.ej. etapa_pedido, referencia)."""
+    permitidas = {"etapa_pedido", "referencia", "proveedor", "cliente",
+                  "incoterm", "moneda", "fecha_emision"}
+    campos = {k: v for k, v in campos.items() if k in permitidas}
+    if not campos:
+        return
+    with engine().begin() as cx:
+        cx.execute(cotizaciones.update().where(cotizaciones.c.id == cotizacion_id).values(**campos))
 
 
 def eliminar_cotizacion(cotizacion_id):

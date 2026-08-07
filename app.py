@@ -133,7 +133,7 @@ if seccion == "➕ Nueva cotización":
     header("Nueva cotización")
     modo = st.radio(
         "¿Cómo quieres crearla?",
-        ["📤 Subir Excel de China", "✍️ Crear manual (proveedor de confianza)"],
+        ["📤 Subir Excel de China", "✍️ Crear a mano (solicitud o compra directa)"],
         horizontal=True,
     )
 
@@ -143,7 +143,8 @@ if seccion == "➕ Nueva cotización":
         archivo = st.file_uploader("Archivo de cotización (.xlsx, .xls o .pdf)", type=["xlsx", "xls", "pdf"])
     else:
         # ------- MODO MANUAL: crear cotización a mano, sin archivo -------
-        st.write("Crea la cotización a mano. Útil cuando ya tienen un proveedor de confianza y van directo a comprar.")
+        st.write("Crea el pedido a mano. Úsalo para **iniciar una solicitud** (solo producto y cantidad, sin precio) "
+                 "o para un **proveedor de confianza** donde van directo a comprar. El precio es opcional.")
         c1, c2 = st.columns(2)
         m_prov = c1.text_input("Proveedor", key="m_prov")
         m_cli = c2.text_input("Cliente", value="Traki Distribuidora, C.A.", key="m_cli")
@@ -152,6 +153,11 @@ if seccion == "➕ Nueva cotización":
         m_inco = c4.selectbox("Incoterm", ["EXW", "FOB", "CIF", "CFR", "DDP"], key="m_inco")
         m_mon = c5.selectbox("Moneda", ["USD", "CNY"], key="m_mon")
         m_ref = st.text_input("N° de cotización / referencia (opcional)", key="m_ref")
+        m_etapa = st.selectbox(
+            "Etapa del pedido", db.ETAPAS_PEDIDO, index=0,
+            help="Solicitud = solo producto y cantidad (aún sin precio). Elige otra si el pedido ya avanzó.",
+            key="m_etapa",
+        )
 
         st.markdown("**Productos** — escribe cada uno y agrega filas con el ➕ de la tabla:")
         UNIDADES = ["pc", "set", "pair", "kg", "g", "ton", "m", "meters", "cm",
@@ -195,7 +201,7 @@ if seccion == "➕ Nueva cotización":
 
         if st.button("💾 Guardar cotización manual", type="primary", disabled=not filas):
             cab = {"referencia": (m_ref.strip() or None), "proveedor": m_prov or None,
-                   "cliente": m_cli or None,
+                   "cliente": m_cli or None, "etapa_pedido": m_etapa,
                    "fecha_emision": m_fecha.isoformat() if m_fecha else None,
                    "incoterm": m_inco, "moneda": m_mon}
             lineas_m = []
@@ -359,14 +365,28 @@ if seccion == "➕ Nueva cotización":
 # =============================================================================
 elif seccion == "📋 Tablero de compras":
     header("Tablero de compras")
+    EMOJI_ETAPA = {"Solicitud": "📝", "Cotizado": "💰", "Aprobado": "✅", "Comprado": "🛒", "Recibido": "📦"}
     if not cots:
-        st.info("Aún no hay cotizaciones. Sube una en «Nueva cotización».")
-    for co in cots:
+        st.info("Aún no hay pedidos. Crea uno en «Nueva cotización».")
+    filtro_etapa = st.selectbox("Filtrar por etapa", ["Todas"] + db.ETAPAS_PEDIDO, key="tb_filtro")
+    cots_f = [c for c in cots if filtro_etapa == "Todas" or (c.get("etapa_pedido") or "Cotizado") == filtro_etapa]
+    if cots and not cots_f:
+        st.caption("Ningún pedido en esa etapa.")
+    for co in cots_f:
+        et = co.get("etapa_pedido") or "Cotizado"
         ref_txt = f"Ref {co['referencia']} · " if co.get("referencia") else ""
-        titulo = f"#{co['id']} · {ref_txt}{co.get('proveedor') or 'Proveedor?'} · {co.get('fecha_emision') or ''} · {co['n_aprob']}/{co['n_lineas']} aprobados"
+        titulo = f"{EMOJI_ETAPA.get(et, '')} {et}  ·  #{co['id']} · {ref_txt}{co.get('proveedor') or 'Proveedor?'} · {co['n_aprob']}/{co['n_lineas']} aprob."
         with st.expander(titulo):
-            m = f"Incoterm {co.get('incoterm') or '—'} · Total EXW {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''}"
+            m = f"Incoterm {co.get('incoterm') or '—'} · Total {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''} · {co.get('fecha_emision') or ''}"
             st.caption(m)
+            nueva_et = st.selectbox(
+                "Etapa del pedido", db.ETAPAS_PEDIDO,
+                index=db.ETAPAS_PEDIDO.index(et) if et in db.ETAPAS_PEDIDO else 1,
+                key=f"tb_etapa_{co['id']}",
+            )
+            if nueva_et != et:
+                db.actualizar_cotizacion(co["id"], {"etapa_pedido": nueva_et})
+                st.rerun()
             lineas = db.get_lineas(co["id"])
             for l in lineas:
                 cimg, cinfo, cacc = st.columns([1, 3, 2])
@@ -391,11 +411,6 @@ elif seccion == "📋 Tablero de compras":
                         index=db.ESTADOS_APROB.index(l["estado"]) if l["estado"] in db.ESTADOS_APROB else 0,
                         key=f"tb_est_{l['id']}",
                     )
-                    nueva_etapa = st.selectbox(
-                        "Etapa importación", db.ETAPAS,
-                        index=db.ETAPAS.index(l["etapa"]) if l.get("etapa") in db.ETAPAS else 0,
-                        key=f"tb_eta_{l['id']}",
-                    )
                     nueva_cant = ca
                     if nuevo_estado == "Aprobado":
                         nueva_cant = st.number_input(
@@ -406,8 +421,6 @@ elif seccion == "📋 Tablero de compras":
                     cambios = {}
                     if nuevo_estado != l["estado"]:
                         cambios["estado"] = nuevo_estado
-                    if nueva_etapa != l.get("etapa"):
-                        cambios["etapa"] = nueva_etapa
                     if nuevo_estado == "Aprobado" and nueva_cant != ca:
                         cambios["cantidad_aprob"] = nueva_cant
                     if cambios:
