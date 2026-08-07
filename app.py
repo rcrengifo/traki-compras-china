@@ -11,6 +11,7 @@ import streamlit as st
 
 import db
 import export_excel
+import export_pdf
 from parser_cotizacion import leer_cotizacion
 from parser_pdf import leer_cotizacion_pdf
 from contenedor import calcular, CONTENEDORES
@@ -219,12 +220,20 @@ if seccion == "➕ Nueva cotización":
             if mls and mcot:
                 st.success(f"Cotización manual #{mid} guardada. Ya está en el Tablero.")
                 if any(l["estado"] == "Aprobado" for l in mls):
-                    st.download_button(
-                        "⬇️ Descargar esta cotización para China",
+                    bx, bp = st.columns(2)
+                    bx.download_button(
+                        "⬇️ Excel · China",
                         data=export_excel.generar(mcot, mls),
                         file_name=f"OC_manual_{mid}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"dlman_{mid}", type="primary",
+                        key=f"dlmanx_{mid}", type="primary",
+                    )
+                    bp.download_button(
+                        "⬇️ PDF · revisar/teléfono",
+                        data=export_pdf.generar(mcot, mls),
+                        file_name=f"OC_manual_{mid}.pdf",
+                        mime="application/pdf",
+                        key=f"dlmanp_{mid}",
                     )
                 if st.button("➕ Crear otra cotización", key="nueva_manual"):
                     st.session_state.pop("_ult_manual", None)
@@ -411,13 +420,23 @@ elif seccion == "📋 Tablero de compras":
             cbaja, cborra = st.columns([2, 1])
             with cbaja:
                 if n_aprob:
-                    xlsx = export_excel.generar(co, lineas)
-                    st.download_button(
-                        f"⬇️ Descargar aprobados para China ({n_aprob})",
-                        data=xlsx,
-                        file_name=f"OC_aprobada_{co['id']}_{(co.get('proveedor') or 'proveedor')[:20]}.xlsx",
+                    nombre = (co.get("proveedor") or "proveedor")[:20]
+                    bx, bp = st.columns(2)
+                    bx.download_button(
+                        f"⬇️ Excel · China ({n_aprob})",
+                        data=export_excel.generar(co, lineas),
+                        file_name=f"OC_{co['id']}_{nombre}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"dl_{co['id']}", type="primary",
+                        key=f"dlx_{co['id']}", type="primary",
+                        help="Editable. Para el proveedor en China.",
+                    )
+                    bp.download_button(
+                        "⬇️ PDF · revisar/teléfono",
+                        data=export_pdf.generar(co, lineas),
+                        file_name=f"OC_{co['id']}_{nombre}.pdf",
+                        mime="application/pdf",
+                        key=f"dlp_{co['id']}",
+                        help="Las fotos se ven en WhatsApp/iPhone. Para que el jefe o tu esposa revisen.",
                     )
                 else:
                     st.caption("Aprueba productos para poder descargar la orden.")
