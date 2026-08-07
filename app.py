@@ -301,6 +301,20 @@ if seccion == "➕ Nueva cotización":
                     )
             st.markdown("<hr style='margin:4px 0;border:0;border-top:1px solid #eee'>", unsafe_allow_html=True)
 
+        # --- fotos: agregar o cambiar (útil si el archivo vino sin fotos, p.ej. .xls) ---
+        fotos_sub = {}
+        with st.expander("📷 Agregar o cambiar fotos de los productos (opcional)"):
+            st.caption("Si la cotización vino sin fotos (p.ej. archivos .xls), súbelas aquí; saldrán en el tablero y en el Excel para China.")
+            for i, l in enumerate(lineas):
+                estado_foto = "✅ tiene foto" if l.get("imagen") else "— sin foto"
+                up = st.file_uploader(
+                    f"#{l['sn']} {l['descripcion'].splitlines()[0][:45]}  ({estado_foto})",
+                    type=["png", "jpg", "jpeg"],
+                    key=f"upfoto_{st.session_state.get('_archivo_cargado','')}_{i}",
+                )
+                if up is not None:
+                    fotos_sub[i] = up.getvalue()
+
         # --- resumen y guardar ---
         def _cant_aprob(i):
             """cantidad aprobada elegida (o la cotizada si no se tocó)."""
@@ -323,6 +337,8 @@ if seccion == "➕ Nueva cotización":
             for i in range(len(lineas)):
                 lineas[i]["estado"] = st.session_state["_estados"][i]
                 lineas[i]["cantidad_aprob"] = _cant_aprob(i)
+                if i in fotos_sub:
+                    lineas[i]["imagen"] = fotos_sub[i]
             cot_id = db.guardar_cotizacion(cab, lineas, archivo_nombre=archivo.name)
             st.success(f"Cotización guardada (#{cot_id}). Los productos aprobados ya están en el tablero.")
             for k in ("_data", "_archivo_cargado", "_estados"):
