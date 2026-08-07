@@ -379,10 +379,34 @@ elif seccion == "📋 Tablero de compras":
         with st.expander(titulo):
             m = f"Incoterm {co.get('incoterm') or '—'} · Total {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''} · {co.get('fecha_emision') or ''}"
             st.caption(m)
-            nueva_et = st.selectbox(
-                "Etapa del pedido", db.ETAPAS_PEDIDO,
-                index=db.ETAPAS_PEDIDO.index(et) if et in db.ETAPAS_PEDIDO else 1,
-                key=f"tb_etapa_{co['id']}",
+
+            # --- barra visual del flujo (etapas del pedido) ---
+            _idx = db.ETAPAS_PEDIDO.index(et) if et in db.ETAPAS_PEDIDO else 0
+            _pills = []
+            for _i, _e in enumerate(db.ETAPAS_PEDIDO):
+                if _i < _idx:
+                    _sty = "background:rgba(22,163,74,.15);color:#16a34a;"        # completada
+                elif _i == _idx:
+                    _sty = "background:#E30613;color:#fff;font-weight:700;"        # actual
+                else:
+                    _sty = "background:rgba(120,120,120,.14);color:#9ca3af;"       # pendiente
+                _pills.append(f'<span style="padding:5px 12px;border-radius:999px;font-size:12px;'
+                              f'white-space:nowrap;{_sty}">{EMOJI_ETAPA.get(_e, "")} {_e}</span>')
+            st.markdown('<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:4px 0 12px">'
+                        + '<span style="color:#9ca3af;font-weight:700">›</span>'.join(_pills)
+                        + '</div>', unsafe_allow_html=True)
+
+            # botones para avanzar / retroceder + selector para saltar a cualquier etapa
+            bprev, bnext, bsel = st.columns([1, 1, 2])
+            if bprev.button("◀ Atrás", key=f"et_prev_{co['id']}", disabled=_idx == 0):
+                db.actualizar_cotizacion(co["id"], {"etapa_pedido": db.ETAPAS_PEDIDO[_idx - 1]})
+                st.rerun()
+            if bnext.button("Avanzar ▶", key=f"et_next_{co['id']}", disabled=_idx >= len(db.ETAPAS_PEDIDO) - 1, type="primary"):
+                db.actualizar_cotizacion(co["id"], {"etapa_pedido": db.ETAPAS_PEDIDO[_idx + 1]})
+                st.rerun()
+            nueva_et = bsel.selectbox(
+                "Cambiar etapa", db.ETAPAS_PEDIDO,
+                index=_idx, key=f"tb_etapa_{co['id']}", label_visibility="collapsed",
             )
             if nueva_et != et:
                 db.actualizar_cotizacion(co["id"], {"etapa_pedido": nueva_et})
