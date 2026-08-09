@@ -3,6 +3,7 @@ Compras China - herramienta de gestion de importaciones.
 App Streamlit. Ejecutar:  streamlit run app.py
 """
 import os
+import json
 import base64
 import tempfile
 from functools import lru_cache
@@ -380,9 +381,18 @@ elif seccion == "📋 Tablero de compras":
             m = f"Incoterm {co.get('incoterm') or '—'} · Total {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''} · {co.get('fecha_emision') or ''}"
             st.caption(m)
 
-            # --- barra visual del flujo (etapas del pedido) ---
+            # --- barra visual del flujo (etapas + fecha de cada paso) ---
             _idx = db.ETAPAS_PEDIDO.index(et) if et in db.ETAPAS_PEDIDO else 0
-            _pills = []
+            try:
+                _fechas = json.loads(co.get("fechas_etapa") or "{}")
+            except (ValueError, TypeError):
+                _fechas = {}
+
+            def _fmt(iso):
+                p = str(iso).split("-")
+                return f"{p[2]}/{p[1]}" if len(p) == 3 else ""
+
+            _items = []
             for _i, _e in enumerate(db.ETAPAS_PEDIDO):
                 if _i < _idx:
                     _sty = "background:rgba(22,163,74,.15);color:#16a34a;"        # completada
@@ -390,10 +400,15 @@ elif seccion == "📋 Tablero de compras":
                     _sty = "background:#E30613;color:#fff;font-weight:700;"        # actual
                 else:
                     _sty = "background:rgba(120,120,120,.14);color:#9ca3af;"       # pendiente
-                _pills.append(f'<span style="padding:5px 12px;border-radius:999px;font-size:12px;'
-                              f'white-space:nowrap;{_sty}">{EMOJI_ETAPA.get(_e, "")} {_e}</span>')
-            st.markdown('<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:4px 0 12px">'
-                        + '<span style="color:#9ca3af;font-weight:700">›</span>'.join(_pills)
+                _fecha = _fmt(_fechas.get(_e, ""))
+                _items.append(
+                    '<div style="display:flex;flex-direction:column;align-items:center;gap:3px">'
+                    f'<span style="padding:5px 12px;border-radius:999px;font-size:12px;white-space:nowrap;{_sty}">'
+                    f'{EMOJI_ETAPA.get(_e, "")} {_e}</span>'
+                    f'<span style="font-size:10px;color:#9ca3af;min-height:12px">{_fecha}</span></div>'
+                )
+            st.markdown('<div style="display:flex;gap:7px;align-items:flex-start;flex-wrap:wrap;margin:4px 0 12px">'
+                        + '<span style="color:#9ca3af;font-weight:700;padding-top:6px">›</span>'.join(_items)
                         + '</div>', unsafe_allow_html=True)
 
             # botones para avanzar / retroceder + selector para saltar a cualquier etapa

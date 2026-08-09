@@ -9,7 +9,8 @@ Las imagenes de los productos se guardan COMO BYTES dentro de la base, para
 no depender de archivos (Streamlit Cloud borra el sistema de archivos al reiniciar).
 """
 import os
-from datetime import datetime
+import json
+from datetime import datetime, date
 
 from sqlalchemy import (
     create_engine, MetaData, Table, Column, Integer, Text, Float,
@@ -53,6 +54,7 @@ cotizaciones = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("referencia", Text),
     Column("etapa_pedido", Text),
+    Column("fechas_etapa", Text),   # JSON {etapa: fecha ISO}
     Column("proveedor", Text), Column("contacto", Text), Column("email", Text),
     Column("whatsapp", Text), Column("cliente", Text), Column("fecha_emision", Text),
     Column("incoterm", Text), Column("moneda", Text), Column("lead_time", Text),
@@ -96,7 +98,7 @@ def _asegurar_columnas():
     Necesario porque create_all no altera tablas que ya existen (p.ej. en Supabase)."""
     from sqlalchemy import inspect
     nuevas = {"lineas": {"cantidad_aprob": "FLOAT"},
-              "cotizaciones": {"referencia": "TEXT", "etapa_pedido": "TEXT"}}
+              "cotizaciones": {"referencia": "TEXT", "etapa_pedido": "TEXT", "fechas_etapa": "TEXT"}}
     insp = inspect(engine())
     with engine().begin() as cx:
         for tabla, cols in nuevas.items():
@@ -122,9 +124,11 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
     ahora = datetime.now().isoformat(timespec="seconds")
     total = sum((l.get("total") or 0) for l in filas if l.get("estado", "Pendiente") != "Eliminado")
     with engine().begin() as cx:
+        etapa_ini = cabecera.get("etapa_pedido") or "Cotizado"
         res = cx.execute(cotizaciones.insert().values(
             referencia=cabecera.get("referencia"),
-            etapa_pedido=cabecera.get("etapa_pedido") or "Cotizado",
+            etapa_pedido=etapa_ini,
+            fechas_etapa=json.dumps({etapa_ini: date.today().isoformat()}),
             proveedor=cabecera.get("proveedor"), contacto=cabecera.get("contacto"),
             email=cabecera.get("email"), whatsapp=cabecera.get("whatsapp"),
             cliente=cabecera.get("cliente"), fecha_emision=cabecera.get("fecha_emision"),
@@ -152,12 +156,26 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
 
 
 def actualizar_cotizacion(cotizacion_id, campos):
-    """Actualiza campos de cabecera (p.ej. etapa_pedido, referencia)."""
-    permitidas = {"etapa_pedido", "referencia", "proveedor", "cliente",
+    """Actualiza campos de cabecera. Al cambiar etapa_pedido, sella la fecha del paso."""
+    permitidas = {"etapa_pedido", "fechas_etapa", "referencia", "proveedor", "cliente",
                   "incoterm", "moneda", "fecha_emision"}
     campos = {k: v for k, v in campos.items() if k in permitidas}
     if not campos:
         return
+    # al avanzar de etapa, guardar la fecha de ese paso (si no la tiene)
+    if "etapa_pedido" in campos:
+        with engine().connect() as cx:
+            actual = cx.execute(
+                select(cotizaciones.c.fechas_etapa).where(cotizaciones.c.id == cotizacion_id)
+            ).scalar()
+        try:
+            fechas = json.loads(actual) if actual else {}
+        except (ValueError, TypeError):
+            fechas = {}
+        et = campos["etapa_pedido"]
+        if et not in fechas:
+            fechas[et] = date.today().isoformat()
+        campos["fechas_etapa"] = json.dumps(fechas)
     with engine().begin() as cx:
         cx.execute(cotizaciones.update().where(cotizaciones.c.id == cotizacion_id).values(**campos))
 
