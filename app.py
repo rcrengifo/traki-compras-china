@@ -134,7 +134,8 @@ if seccion == "➕ Nueva cotización":
     header("Nueva cotización")
     modo = st.radio(
         "¿Cómo quieres crearla?",
-        ["📤 Subir Excel de China", "✍️ Crear a mano (solicitud o compra directa)"],
+        ["📤 Subir cotización de China", "✍️ Crear a mano (solicitud / compra)",
+         "📦 Registrar pedido en camino"],
         horizontal=True,
     )
 
@@ -142,7 +143,7 @@ if seccion == "➕ Nueva cotización":
     if modo.startswith("📤"):
         st.write("Sube la cotización que manda China (**Excel o PDF**). El sistema lee los productos y sus fotos automáticamente.")
         archivo = st.file_uploader("Archivo de cotización (.xlsx, .xls o .pdf)", type=["xlsx", "xls", "pdf"])
-    else:
+    elif modo.startswith("✍️"):
         # ------- MODO MANUAL: crear cotización a mano, sin archivo -------
         st.write("Crea el pedido a mano. Úsalo para **iniciar una solicitud** (solo producto y cantidad, sin precio) "
                  "o para un **proveedor de confianza** donde van directo a comprar. El precio es opcional.")
@@ -245,6 +246,66 @@ if seccion == "➕ Nueva cotización":
                 if st.button("➕ Crear otra cotización", key="nueva_manual"):
                     st.session_state.pop("_ult_manual", None)
                     st.rerun()
+
+    else:
+        # ------- REGISTRAR PEDIDO EN CAMINO: ya comprado, solo seguir la llegada -------
+        st.write("Registra un pedido que **ya fue comprado/aprobado** en China, para seguir su **llegada a Venezuela**. "
+                 "Puedes adjuntar la proforma y poner los datos del envío.")
+        c1, c2 = st.columns(2)
+        r_prov = c1.text_input("Proveedor", key="r_prov")
+        r_ref = c2.text_input("N° de cotización / referencia (PO)", key="r_ref")
+        c3, c4 = st.columns(2)
+        r_etapa = c3.selectbox("Etapa actual", db.ETAPAS_PEDIDO,
+                               index=db.ETAPAS_PEDIDO.index("Comprado"), key="r_etapa")
+        r_mon = c4.selectbox("Moneda", ["USD", "CNY"], key="r_mon")
+
+        st.markdown("**🚚 Datos del envío**")
+        s1, s2 = st.columns(2)
+        r_cont = s1.text_input("Contenedor", key="r_cont")
+        r_guia = s2.text_input("Guía / BL", key="r_guia")
+        s3, s4 = st.columns(2)
+        r_nav = s3.text_input("Naviera", key="r_nav")
+        r_eta = s4.text_input("ETA — llegada estimada a Venezuela", key="r_eta")
+
+        st.markdown("**Productos** (opcional — o solo adjunta la proforma abajo):")
+        UNID = ["pc", "set", "pair", "kg", "g", "ton", "m", "meters", "cm", "box", "roll", "bag", "liter", "unit"]
+        base_r = pd.DataFrame([{"Producto": "", "Cantidad": None, "Unidad": "pc", "Precio unit": None}])
+        edit_r = st.data_editor(
+            base_r, num_rows="dynamic", width="stretch", hide_index=True,
+            column_config={
+                "Producto": st.column_config.TextColumn(width="large"),
+                "Cantidad": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
+                "Unidad": st.column_config.SelectboxColumn(options=UNID, default="pc"),
+                "Precio unit": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
+            }, key="r_editor",
+        )
+        r_doc = st.file_uploader("📎 Adjuntar la proforma / documento de China (opcional)",
+                                 type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "docx", "doc"], key="r_doc")
+
+        if st.button("💾 Registrar pedido en camino", type="primary"):
+            def _nr(x):
+                return float(x) if pd.notna(x) else 0.0
+            filas_r = [row for _, row in edit_r.iterrows()
+                       if pd.notna(row["Producto"]) and str(row["Producto"]).strip()]
+            cab = {"proveedor": r_prov or None, "referencia": r_ref.strip() or None,
+                   "etapa_pedido": r_etapa, "moneda": r_mon, "cliente": "Traki Distribuidora, C.A."}
+            lineas_r = []
+            for i, row in enumerate(filas_r, start=1):
+                q = _nr(row["Cantidad"]); p = _nr(row["Precio unit"])
+                lineas_r.append({
+                    "sn": i, "descripcion": str(row["Producto"]).strip(),
+                    "cantidad": q, "cantidad_aprob": q,
+                    "unidad": row["Unidad"] if pd.notna(row["Unidad"]) else None,
+                    "precio_unit": p, "total": round(q * p, 2), "estado": "Aprobado", "imagen": None,
+                })
+            cid = db.guardar_cotizacion(cab, lineas_r, "(en camino)")
+            db.actualizar_cotizacion(cid, {
+                "contenedor": r_cont.strip() or None, "guia_bl": r_guia.strip() or None,
+                "naviera": r_nav.strip() or None, "eta": r_eta.strip() or None,
+            })
+            if r_doc is not None:
+                db.agregar_documento(cid, r_doc.name, "Proforma", r_doc.getvalue(), r_doc.type)
+            st.success(f"Pedido #{cid} registrado en etapa «{r_etapa}». Ya está en el Tablero para seguir su llegada. 📦")
 
     if archivo is not None:
         # parsear solo una vez por archivo
