@@ -464,10 +464,21 @@ elif seccion == "📋 Tablero de compras":
     EMOJI_ETAPA = {"Solicitud": "📝", "Cotizado": "💰", "Aprobado": "✅", "Comprado": "🛒", "Recibido": "📦"}
     if not cots:
         st.info("Aún no hay pedidos. Crea uno en «Nueva cotización».")
-    filtro_etapa = st.selectbox("Filtrar por etapa", ["Todas"] + db.ETAPAS_PEDIDO, key="tb_filtro")
-    cots_f = [c for c in cots if filtro_etapa == "Todas" or (c.get("etapa_pedido") or "Cotizado") == filtro_etapa]
+    cbusca, cfiltro = st.columns([2, 1])
+    q = cbusca.text_input("🔎 Buscar pedido", placeholder="Nombre, proveedor, PO o producto…", key="tb_q").strip().lower()
+    filtro_etapa = cfiltro.selectbox("Etapa", ["Todas"] + db.ETAPAS_PEDIDO, key="tb_filtro")
+
+    def _match(c):
+        if not q:
+            return True
+        blob = " ".join(str(c.get(k) or "") for k in ("nombre", "proveedor", "referencia", "primer_producto")).lower()
+        return q in blob
+
+    cots_f = [c for c in cots
+              if (filtro_etapa == "Todas" or (c.get("etapa_pedido") or "Cotizado") == filtro_etapa) and _match(c)]
     if cots and not cots_f:
-        st.caption("Ningún pedido en esa etapa.")
+        st.caption("Ningún pedido coincide con la búsqueda/filtro.")
+    st.caption(f"Mostrando {len(cots_f)} de {len(cots)} pedidos.")
     for co in cots_f:
         et = co.get("etapa_pedido") or "Cotizado"
         _prim = (co.get("primer_producto") or "").splitlines()[0] if co.get("primer_producto") else ""
@@ -481,23 +492,36 @@ elif seccion == "📋 Tablero de compras":
             p = str(iso).split("-")
             return f"{p[2]}/{p[1]}" if len(p) == 3 else str(iso)
 
-        # --- resumen SIEMPRE visible (para escanear el tablero sin abrir cada pedido) ---
+        # --- resumen SIEMPRE visible (liviano: no carga fotos ni genera archivos) ---
         st.divider()
         _fdate = _dm(_fe_t.get(et)) if _fe_t.get(et) else ""
-        st.markdown(f"#### {EMOJI_ETAPA.get(et, '')} {nombre}  ·  #{co['id']}")
-        _chips = [f"**{et}**" + (f" · {_fdate}" if _fdate else "")]
-        if co.get("proveedor"):
-            _chips.append(co["proveedor"])
-        if co.get("referencia"):
-            _chips.append(f"Ref {co['referencia']}")
-        if co.get("n_lineas"):
-            _chips.append(f"🧾 {co['n_lineas']} productos")
-        if co.get("eta"):
-            _chips.append(f"🗓️ Llega {co['eta']}")
-        if co.get("n_docs"):
-            _chips.append(f"📎 {co['n_docs']} documento(s)")
-        st.caption("  ·  ".join(_chips))
-        with st.expander("🔍 Abrir: detalle, envío y documentos"):
+        _abierto = st.session_state.get("pedido_abierto") == co["id"]
+        _cinfo, _cbtn = st.columns([6, 1])
+        with _cinfo:
+            st.markdown(f"#### {EMOJI_ETAPA.get(et, '')} {nombre}  ·  #{co['id']}")
+            _chips = [f"**{et}**" + (f" · {_fdate}" if _fdate else "")]
+            if co.get("proveedor"):
+                _chips.append(co["proveedor"])
+            if co.get("referencia"):
+                _chips.append(f"Ref {co['referencia']}")
+            if co.get("n_lineas"):
+                _chips.append(f"🧾 {co['n_lineas']} productos")
+            if co.get("eta"):
+                _chips.append(f"🗓️ Llega {co['eta']}")
+            if co.get("n_docs"):
+                _chips.append(f"📎 {co['n_docs']} documento(s)")
+            st.caption("  ·  ".join(_chips))
+        with _cbtn:
+            if _abierto:
+                if st.button("Cerrar ✕", key=f"cerrar_{co['id']}"):
+                    st.session_state["pedido_abierto"] = None
+                    st.rerun()
+            elif st.button("🔍 Abrir", key=f"abrir_{co['id']}"):
+                st.session_state["pedido_abierto"] = co["id"]
+                st.rerun()
+
+        # --- detalle PESADO: SOLO del pedido abierto (clave para escalar) ---
+        if _abierto:
             m = f"Incoterm {co.get('incoterm') or '—'} · Total {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''} · {co.get('fecha_emision') or ''}"
             st.caption(m)
             _nom = st.text_input("Nombre del pedido", value=co.get("nombre") or "",
