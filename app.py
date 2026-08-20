@@ -3,6 +3,7 @@ Compras China - herramienta de gestion de importaciones.
 App Streamlit. Ejecutar:  streamlit run app.py
 """
 import os
+import io
 import json
 import base64
 import tempfile
@@ -91,6 +92,21 @@ COLOR_ETAPA = {
     "Sin ordenar": "⚪", "Ordenado": "🟠", "En importacion": "🔵",
     "En transito": "🟣", "En aduana": "🟤", "Recibido": "🟢",
 }
+
+
+def preview_documento(nombre, archivo_bytes, max_rows=300):
+    """Devuelve un DataFrame con TODO el contenido del Excel/CSV, o None si no aplica."""
+    n = (nombre or "").lower()
+    try:
+        if n.endswith(".csv"):
+            return pd.read_csv(io.BytesIO(archivo_bytes), header=None, dtype=str, nrows=max_rows)
+        if n.endswith((".xlsx", ".xlsm")):
+            return pd.read_excel(io.BytesIO(archivo_bytes), header=None, engine="openpyxl", nrows=max_rows)
+        if n.endswith(".xls"):
+            return pd.read_excel(io.BytesIO(archivo_bytes), header=None, engine="xlrd", nrows=max_rows)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
 
 
 def mostrar_imagen(col, valor):
@@ -593,6 +609,19 @@ elif seccion == "📋 Tablero de compras":
                 if dc3.button("🗑️", key=f"docdel_{d['id']}"):
                     db.eliminar_documento(d["id"])
                     st.rerun()
+                # vista previa del contenido dentro del sistema (sin bajar el archivo)
+                if _full and _full.get("archivo"):
+                    _nl = (d["nombre"] or "").lower()
+                    if _nl.endswith((".xlsx", ".xls", ".xlsm", ".csv")):
+                        with st.expander("👁️ Ver todo el contenido del archivo"):
+                            _dfp = preview_documento(d["nombre"], _full["archivo"])
+                            if _dfp is not None:
+                                st.dataframe(_dfp, width="stretch")
+                            else:
+                                st.caption("No pude mostrar el contenido aquí; descárgalo con ⬇️.")
+                    elif _nl.endswith((".png", ".jpg", ".jpeg")):
+                        with st.expander("👁️ Ver imagen"):
+                            st.image(_full["archivo"])
             with st.form(f"docup_{co['id']}", clear_on_submit=True):
                 u1, u2 = st.columns([1, 2])
                 _tipo = u1.selectbox("Tipo", db.TIPOS_DOC, key=f"doctipo_{co['id']}")
