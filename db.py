@@ -249,7 +249,9 @@ def listar_cotizaciones():
         rows = cx.execute(text("""
             SELECT co.*,
                    (SELECT COUNT(*) FROM lineas l WHERE l.cotizacion_id=co.id) AS n_lineas,
-                   (SELECT COUNT(*) FROM lineas l WHERE l.cotizacion_id=co.id AND l.estado='Aprobado') AS n_aprob
+                   (SELECT COUNT(*) FROM lineas l WHERE l.cotizacion_id=co.id AND l.estado='Aprobado') AS n_aprob,
+                   (SELECT l.descripcion FROM lineas l WHERE l.cotizacion_id=co.id ORDER BY l.id LIMIT 1) AS primer_producto,
+                   (SELECT COUNT(*) FROM documentos d WHERE d.cotizacion_id=co.id) AS n_docs
             FROM cotizaciones co ORDER BY co.id DESC
         """)).mappings().all()
         return [dict(r) for r in rows]

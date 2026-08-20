@@ -470,7 +470,8 @@ elif seccion == "📋 Tablero de compras":
         st.caption("Ningún pedido en esa etapa.")
     for co in cots_f:
         et = co.get("etapa_pedido") or "Cotizado"
-        nombre = co.get("nombre") or co.get("referencia") or co.get("proveedor") or f"Pedido #{co['id']}"
+        _prim = (co.get("primer_producto") or "").splitlines()[0] if co.get("primer_producto") else ""
+        nombre = co.get("nombre") or _prim or co.get("referencia") or co.get("proveedor") or f"Pedido #{co['id']}"
         try:
             _fe_t = json.loads(co.get("fechas_etapa") or "{}")
         except (ValueError, TypeError):
@@ -480,10 +481,23 @@ elif seccion == "📋 Tablero de compras":
             p = str(iso).split("-")
             return f"{p[2]}/{p[1]}" if len(p) == 3 else str(iso)
 
-        fdate_txt = f" · {_dm(_fe_t.get(et))}" if _fe_t.get(et) else ""
-        eta_txt = f"  ·  🗓️ Llega {co['eta']}" if co.get("eta") else ""
-        titulo = f"{EMOJI_ETAPA.get(et, '')} {et}{fdate_txt}  ·  {nombre}  ·  #{co['id']}{eta_txt}"
-        with st.expander(titulo):
+        # --- resumen SIEMPRE visible (para escanear el tablero sin abrir cada pedido) ---
+        st.divider()
+        _fdate = _dm(_fe_t.get(et)) if _fe_t.get(et) else ""
+        st.markdown(f"#### {EMOJI_ETAPA.get(et, '')} {nombre}  ·  #{co['id']}")
+        _chips = [f"**{et}**" + (f" · {_fdate}" if _fdate else "")]
+        if co.get("proveedor"):
+            _chips.append(co["proveedor"])
+        if co.get("referencia"):
+            _chips.append(f"Ref {co['referencia']}")
+        if co.get("n_lineas"):
+            _chips.append(f"🧾 {co['n_lineas']} productos")
+        if co.get("eta"):
+            _chips.append(f"🗓️ Llega {co['eta']}")
+        if co.get("n_docs"):
+            _chips.append(f"📎 {co['n_docs']} documento(s)")
+        st.caption("  ·  ".join(_chips))
+        with st.expander("🔍 Abrir: detalle, envío y documentos"):
             m = f"Incoterm {co.get('incoterm') or '—'} · Total {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''} · {co.get('fecha_emision') or ''}"
             st.caption(m)
             _nom = st.text_input("Nombre del pedido", value=co.get("nombre") or "",
@@ -498,6 +512,35 @@ elif seccion == "📋 Tablero de compras":
             if _obs.strip() != (co.get("observaciones") or ""):
                 db.actualizar_cotizacion(co["id"], {"observaciones": _obs.strip() or None})
                 st.rerun()
+
+            # --- documentos adjuntos (lo primero: ver el archivo de lo comprado) ---
+            st.markdown("**📎 Documentos del pedido**")
+            docs = db.listar_documentos(co["id"])
+            if not docs:
+                st.caption("Aún no hay documentos. Adjunta la proforma, factura o guía que manda China.")
+            for d in docs:
+                dc1, dc2, dc3 = st.columns([4, 1, 1])
+                dc1.write(f"📄 **{d['tipo']}** · {d['nombre']}  ·  _{(d.get('subido_en') or '')[:10]}_")
+                _full = db.get_documento(d["id"])
+                if _full and _full.get("archivo"):
+                    dc2.download_button("⬇️", data=_full["archivo"], file_name=d["nombre"],
+                                        mime=d.get("mime") or "application/octet-stream",
+                                        key=f"docdl_{d['id']}")
+                if dc3.button("🗑️", key=f"docdel_{d['id']}"):
+                    db.eliminar_documento(d["id"])
+                    st.rerun()
+            with st.form(f"docup_{co['id']}", clear_on_submit=True):
+                u1, u2 = st.columns([1, 2])
+                _tipo = u1.selectbox("Tipo", db.TIPOS_DOC, key=f"doctipo_{co['id']}")
+                _arch = u2.file_uploader("Archivo (PDF, Excel, imagen…)",
+                                         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "docx", "doc"],
+                                         key=f"docfile_{co['id']}")
+                if st.form_submit_button("📎 Adjuntar documento"):
+                    if _arch is not None:
+                        db.agregar_documento(co["id"], _arch.name, _tipo, _arch.getvalue(), _arch.type)
+                        st.rerun()
+                    else:
+                        st.warning("Elige un archivo primero.")
 
             # --- barra visual del flujo (etapas + fecha de cada paso) ---
             _idx = db.ETAPAS_PEDIDO.index(et) if et in db.ETAPAS_PEDIDO else 0
@@ -599,35 +642,6 @@ elif seccion == "📋 Tablero de compras":
                         "naviera": v_nav.strip() or None, "eta": v_eta.strip() or None,
                     })
                     st.rerun()
-
-            # --- documentos adjuntos (proforma, factura, guía/BL...) ---
-            st.markdown("**📎 Documentos del pedido**")
-            docs = db.listar_documentos(co["id"])
-            if not docs:
-                st.caption("Aún no hay documentos. Adjunta la proforma, factura o guía que manda China.")
-            for d in docs:
-                dc1, dc2, dc3 = st.columns([4, 1, 1])
-                dc1.write(f"📄 **{d['tipo']}** · {d['nombre']}  ·  _{(d.get('subido_en') or '')[:10]}_")
-                _full = db.get_documento(d["id"])
-                if _full and _full.get("archivo"):
-                    dc2.download_button("⬇️", data=_full["archivo"], file_name=d["nombre"],
-                                        mime=d.get("mime") or "application/octet-stream",
-                                        key=f"docdl_{d['id']}")
-                if dc3.button("🗑️", key=f"docdel_{d['id']}"):
-                    db.eliminar_documento(d["id"])
-                    st.rerun()
-            with st.form(f"docup_{co['id']}", clear_on_submit=True):
-                u1, u2 = st.columns([1, 2])
-                _tipo = u1.selectbox("Tipo", db.TIPOS_DOC, key=f"doctipo_{co['id']}")
-                _arch = u2.file_uploader("Archivo (PDF, Excel, imagen…)",
-                                         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "docx", "doc"],
-                                         key=f"docfile_{co['id']}")
-                if st.form_submit_button("📎 Adjuntar documento"):
-                    if _arch is not None:
-                        db.agregar_documento(co["id"], _arch.name, _tipo, _arch.getvalue(), _arch.type)
-                        st.rerun()
-                    else:
-                        st.warning("Elige un archivo primero.")
 
             # --- acciones de la cotización: descargar aprobados / eliminar ---
             st.markdown("---")
