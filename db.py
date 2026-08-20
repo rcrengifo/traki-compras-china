@@ -54,6 +54,8 @@ _metadata = MetaData()
 cotizaciones = Table(
     "cotizaciones", _metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("nombre", Text),          # rotulo corto para identificar el pedido
+    Column("observaciones", Text),   # comentarios libres del pedido
     Column("referencia", Text),
     Column("etapa_pedido", Text),
     Column("fechas_etapa", Text),   # JSON {etapa: fecha ISO}
@@ -113,9 +115,9 @@ def _asegurar_columnas():
     Necesario porque create_all no altera tablas que ya existen (p.ej. en Supabase)."""
     from sqlalchemy import inspect
     nuevas = {"lineas": {"cantidad_aprob": "FLOAT"},
-              "cotizaciones": {"referencia": "TEXT", "etapa_pedido": "TEXT", "fechas_etapa": "TEXT",
-                               "contenedor": "TEXT", "guia_bl": "TEXT", "naviera": "TEXT",
-                               "eta": "TEXT", "notas_envio": "TEXT"}}
+              "cotizaciones": {"nombre": "TEXT", "observaciones": "TEXT", "referencia": "TEXT", "etapa_pedido": "TEXT",
+                               "fechas_etapa": "TEXT", "contenedor": "TEXT", "guia_bl": "TEXT",
+                               "naviera": "TEXT", "eta": "TEXT", "notas_envio": "TEXT"}}
     insp = inspect(engine())
     with engine().begin() as cx:
         for tabla, cols in nuevas.items():
@@ -143,6 +145,7 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
     with engine().begin() as cx:
         etapa_ini = cabecera.get("etapa_pedido") or "Cotizado"
         res = cx.execute(cotizaciones.insert().values(
+            nombre=cabecera.get("nombre"),
             referencia=cabecera.get("referencia"),
             etapa_pedido=etapa_ini,
             fechas_etapa=json.dumps({etapa_ini: date.today().isoformat()}),
@@ -174,7 +177,7 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
 
 def actualizar_cotizacion(cotizacion_id, campos):
     """Actualiza campos de cabecera. Al cambiar etapa_pedido, sella la fecha del paso."""
-    permitidas = {"etapa_pedido", "fechas_etapa", "referencia", "proveedor", "cliente",
+    permitidas = {"nombre", "observaciones", "etapa_pedido", "fechas_etapa", "referencia", "proveedor", "cliente",
                   "incoterm", "moneda", "fecha_emision",
                   "contenedor", "guia_bl", "naviera", "eta", "notas_envio"}
     campos = {k: v for k, v in campos.items() if k in permitidas}

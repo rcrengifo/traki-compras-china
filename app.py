@@ -147,6 +147,7 @@ if seccion == "➕ Nueva cotización":
         # ------- MODO MANUAL: crear cotización a mano, sin archivo -------
         st.write("Crea el pedido a mano. Úsalo para **iniciar una solicitud** (solo producto y cantidad, sin precio) "
                  "o para un **proveedor de confianza** donde van directo a comprar. El precio es opcional.")
+        m_nombre = st.text_input("Nombre del pedido", placeholder="Ej: Repuestos Cummins", key="m_nombre")
         c1, c2 = st.columns(2)
         m_prov = c1.text_input("Proveedor", key="m_prov")
         m_cli = c2.text_input("Cliente", value="Traki Distribuidora, C.A.", key="m_cli")
@@ -202,8 +203,8 @@ if seccion == "➕ Nueva cotización":
         st.metric(f"Total ({m_mon})", f"{total_m:,.2f}")
 
         if st.button("💾 Guardar cotización manual", type="primary", disabled=not filas):
-            cab = {"referencia": (m_ref.strip() or None), "proveedor": m_prov or None,
-                   "cliente": m_cli or None, "etapa_pedido": m_etapa,
+            cab = {"nombre": (m_nombre.strip() or None), "referencia": (m_ref.strip() or None),
+                   "proveedor": m_prov or None, "cliente": m_cli or None, "etapa_pedido": m_etapa,
                    "fecha_emision": m_fecha.isoformat() if m_fecha else None,
                    "incoterm": m_inco, "moneda": m_mon}
             lineas_m = []
@@ -251,6 +252,7 @@ if seccion == "➕ Nueva cotización":
         # ------- REGISTRAR PEDIDO EN CAMINO: ya comprado, solo seguir la llegada -------
         st.write("Registra un pedido que **ya fue comprado/aprobado** en China, para seguir su **llegada a Venezuela**. "
                  "Puedes adjuntar la proforma y poner los datos del envío.")
+        r_nombre = st.text_input("Nombre del pedido", placeholder="Ej: Máquinas surtidas XCMG", key="r_nombre")
         c1, c2 = st.columns(2)
         r_prov = c1.text_input("Proveedor", key="r_prov")
         r_ref = c2.text_input("N° de cotización / referencia (PO)", key="r_ref")
@@ -287,8 +289,9 @@ if seccion == "➕ Nueva cotización":
                 return float(x) if pd.notna(x) else 0.0
             filas_r = [row for _, row in edit_r.iterrows()
                        if pd.notna(row["Producto"]) and str(row["Producto"]).strip()]
-            cab = {"proveedor": r_prov or None, "referencia": r_ref.strip() or None,
-                   "etapa_pedido": r_etapa, "moneda": r_mon, "cliente": "Traki Distribuidora, C.A."}
+            cab = {"nombre": (r_nombre.strip() or None), "proveedor": r_prov or None,
+                   "referencia": r_ref.strip() or None, "etapa_pedido": r_etapa, "moneda": r_mon,
+                   "cliente": "Traki Distribuidora, C.A."}
             lineas_r = []
             for i, row in enumerate(filas_r, start=1):
                 q = _nr(row["Cantidad"]); p = _nr(row["Precio unit"])
@@ -341,6 +344,15 @@ if seccion == "➕ Nueva cotización":
             key=f"ref_{st.session_state.get('_archivo_cargado','')}",
         )
         cab["referencia"] = ref_val.strip() or None
+        _nom_def = cab.get("nombre") or ""
+        if not _nom_def and lineas:
+            _nom_def = lineas[0]["descripcion"].splitlines()[0][:45]
+        nom_val = st.text_input(
+            "Nombre del pedido", value=_nom_def,
+            help="Rótulo corto para reconocerlo rápido en el tablero. Puedes editarlo.",
+            key=f"nom_{st.session_state.get('_archivo_cargado','')}",
+        )
+        cab["nombre"] = nom_val.strip() or None
         with st.expander("Ver todos los datos de la cotización"):
             st.write({k: v for k, v in cab.items() if v and not k.startswith("_")})
 
@@ -436,11 +448,24 @@ elif seccion == "📋 Tablero de compras":
         st.caption("Ningún pedido en esa etapa.")
     for co in cots_f:
         et = co.get("etapa_pedido") or "Cotizado"
-        ref_txt = f"Ref {co['referencia']} · " if co.get("referencia") else ""
-        titulo = f"{EMOJI_ETAPA.get(et, '')} {et}  ·  #{co['id']} · {ref_txt}{co.get('proveedor') or 'Proveedor?'} · {co['n_aprob']}/{co['n_lineas']} aprob."
+        nombre = co.get("nombre") or co.get("referencia") or co.get("proveedor") or f"Pedido #{co['id']}"
+        eta_txt = f"  ·  🗓️ Llega {co['eta']}" if co.get("eta") else ""
+        titulo = f"{EMOJI_ETAPA.get(et, '')} {et}  ·  {nombre}  ·  #{co['id']}{eta_txt}"
         with st.expander(titulo):
             m = f"Incoterm {co.get('incoterm') or '—'} · Total {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''} · {co.get('fecha_emision') or ''}"
             st.caption(m)
+            _nom = st.text_input("Nombre del pedido", value=co.get("nombre") or "",
+                                 placeholder="Ej: Máquinas surtidas XCMG",
+                                 key=f"tb_nom_{co['id']}")
+            if _nom.strip() != (co.get("nombre") or ""):
+                db.actualizar_cotizacion(co["id"], {"nombre": _nom.strip() or None})
+                st.rerun()
+            _obs = st.text_area("📝 Observaciones / comentarios", value=co.get("observaciones") or "",
+                                placeholder="Cualquier nota o comentario sobre este pedido…",
+                                height=68, key=f"tb_obs_{co['id']}")
+            if _obs.strip() != (co.get("observaciones") or ""):
+                db.actualizar_cotizacion(co["id"], {"observaciones": _obs.strip() or None})
+                st.rerun()
 
             # --- barra visual del flujo (etapas + fecha de cada paso) ---
             _idx = db.ETAPAS_PEDIDO.index(et) if et in db.ETAPAS_PEDIDO else 0
@@ -536,12 +561,10 @@ elif seccion == "📋 Tablero de compras":
                 e3, e4 = st.columns(2)
                 v_nav = e3.text_input("Naviera", value=co.get("naviera") or "")
                 v_eta = e4.text_input("ETA — llegada estimada a Venezuela", value=co.get("eta") or "")
-                v_notas = st.text_area("Notas del envío", value=co.get("notas_envio") or "", height=68)
                 if st.form_submit_button("💾 Guardar seguimiento", type="primary"):
                     db.actualizar_cotizacion(co["id"], {
                         "contenedor": v_cont.strip() or None, "guia_bl": v_guia.strip() or None,
                         "naviera": v_nav.strip() or None, "eta": v_eta.strip() or None,
-                        "notas_envio": v_notas.strip() or None,
                     })
                     st.rerun()
 
