@@ -360,6 +360,21 @@ if seccion == "➕ Nueva cotización":
         st.subheader(f"Productos ({len(lineas)}) — decide cuáles aprobar")
         st.caption("El jefe aprueba, elimina o deja pendiente cada producto. Si aprueba, puedes ajustar cuántas piezas.")
 
+        # vista rápida en tabla de todo lo que se leyó del archivo
+        with st.expander("📋 Ver en tabla todo lo que se cargó"):
+            st.dataframe(
+                pd.DataFrame([{
+                    "#": l.get("sn"),
+                    "Producto": (l.get("descripcion") or "").splitlines()[0],
+                    "Cantidad": l.get("cantidad"),
+                    "Unidad": l.get("unidad"),
+                    "Precio": l.get("precio_unit"),
+                    "Total": l.get("total"),
+                    "Foto": "✅" if l.get("imagen") else "—",
+                } for l in lineas]),
+                width="stretch", hide_index=True,
+            )
+
         # --- productos, uno por fila con foto ---
         for i, l in enumerate(lineas):
             cimg, cinfo, cest = st.columns([1, 3, 1.3])
@@ -429,7 +444,14 @@ if seccion == "➕ Nueva cotización":
                 if i in fotos_sub:
                     lineas[i]["imagen"] = fotos_sub[i]
             cot_id = db.guardar_cotizacion(cab, lineas, archivo_nombre=archivo.name)
-            st.success(f"Cotización guardada (#{cot_id}). Los productos aprobados ya están en el tablero.")
+            # guardar el archivo original pegado al pedido, para poder verlo/descargarlo luego
+            try:
+                db.agregar_documento(cot_id, archivo.name, "Cotización original",
+                                     archivo.getvalue(), archivo.type)
+            except Exception:  # noqa: BLE001
+                pass
+            st.success(f"Cotización guardada (#{cot_id}). Los productos aprobados ya están en el tablero, "
+                       "y el archivo original quedó en «📎 Documentos».")
             for k in ("_data", "_archivo_cargado", "_estados"):
                 st.session_state.pop(k, None)
 
@@ -449,8 +471,18 @@ elif seccion == "📋 Tablero de compras":
     for co in cots_f:
         et = co.get("etapa_pedido") or "Cotizado"
         nombre = co.get("nombre") or co.get("referencia") or co.get("proveedor") or f"Pedido #{co['id']}"
+        try:
+            _fe_t = json.loads(co.get("fechas_etapa") or "{}")
+        except (ValueError, TypeError):
+            _fe_t = {}
+
+        def _dm(iso):
+            p = str(iso).split("-")
+            return f"{p[2]}/{p[1]}" if len(p) == 3 else str(iso)
+
+        fdate_txt = f" · {_dm(_fe_t.get(et))}" if _fe_t.get(et) else ""
         eta_txt = f"  ·  🗓️ Llega {co['eta']}" if co.get("eta") else ""
-        titulo = f"{EMOJI_ETAPA.get(et, '')} {et}  ·  {nombre}  ·  #{co['id']}{eta_txt}"
+        titulo = f"{EMOJI_ETAPA.get(et, '')} {et}{fdate_txt}  ·  {nombre}  ·  #{co['id']}{eta_txt}"
         with st.expander(titulo):
             m = f"Incoterm {co.get('incoterm') or '—'} · Total {co.get('total_exw') or 0:,.2f} {co.get('moneda') or ''} · {co.get('fecha_emision') or ''}"
             st.caption(m)
