@@ -281,26 +281,65 @@ if seccion == "➕ Nueva cotización":
                 "Precio unit": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
             }, key="r_editor",
         )
-        r_doc = st.file_uploader("📎 Adjuntar la proforma / documento de China (opcional)",
+        r_doc = st.file_uploader("📎 Adjuntar la proforma / documento de China (Excel o PDF: leo los productos)",
                                  type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "docx", "doc"], key="r_doc")
+
+        # si suben la proforma en Excel/PDF, leemos los productos de adentro y los mostramos
+        r_lineas_file = []
+        if r_doc is not None and r_doc.name.lower().endswith((".xlsx", ".xls", ".pdf")):
+            try:
+                _tmpd = tempfile.mkdtemp(prefix="pf_")
+                _p = os.path.join(_tmpd, r_doc.name)
+                with open(_p, "wb") as _f:
+                    _f.write(r_doc.getvalue())
+                _img = os.path.join(_tmpd, "img")
+                _data = (leer_cotizacion_pdf(_p, carpeta_imagenes=_img)
+                         if r_doc.name.lower().endswith(".pdf")
+                         else leer_cotizacion(_p, carpeta_imagenes=_img))
+                r_lineas_file = _data.get("lineas", [])
+            except Exception:  # noqa: BLE001
+                r_lineas_file = []
+            if r_lineas_file:
+                st.success(f"📄 Leí **{len(r_lineas_file)} productos** dentro de la proforma (se cargarán al pedido):")
+                st.dataframe(pd.DataFrame([{
+                    "Producto": (l.get("descripcion") or "").splitlines()[0],
+                    "Cantidad": l.get("cantidad"), "Unidad": l.get("unidad"),
+                    "Precio": l.get("precio_unit"), "Total": l.get("total"),
+                } for l in r_lineas_file]), width="stretch", hide_index=True)
+            else:
+                st.caption("No pude leer productos de ese archivo; se guardará solo como documento adjunto.")
 
         if st.button("💾 Registrar pedido en camino", type="primary"):
             def _nr(x):
                 return float(x) if pd.notna(x) else 0.0
-            filas_r = [row for _, row in edit_r.iterrows()
-                       if pd.notna(row["Producto"]) and str(row["Producto"]).strip()]
-            cab = {"nombre": (r_nombre.strip() or None), "proveedor": r_prov or None,
+            # productos: preferir los leídos de la proforma; si no, los escritos a mano
+            if r_lineas_file:
+                lineas_r = []
+                for i, l in enumerate(r_lineas_file, start=1):
+                    q = l.get("cantidad") or 0
+                    lineas_r.append({
+                        "sn": l.get("sn") or i, "descripcion": l.get("descripcion") or "",
+                        "cantidad": q, "cantidad_aprob": q, "unidad": l.get("unidad"),
+                        "precio_unit": l.get("precio_unit"), "total": l.get("total"),
+                        "estado": "Aprobado", "imagen": l.get("imagen"), "nota": l.get("nota"),
+                    })
+            else:
+                filas_r = [row for _, row in edit_r.iterrows()
+                           if pd.notna(row["Producto"]) and str(row["Producto"]).strip()]
+                lineas_r = []
+                for i, row in enumerate(filas_r, start=1):
+                    q = _nr(row["Cantidad"]); p = _nr(row["Precio unit"])
+                    lineas_r.append({
+                        "sn": i, "descripcion": str(row["Producto"]).strip(),
+                        "cantidad": q, "cantidad_aprob": q,
+                        "unidad": row["Unidad"] if pd.notna(row["Unidad"]) else None,
+                        "precio_unit": p, "total": round(q * p, 2), "estado": "Aprobado", "imagen": None,
+                    })
+            # nombre: si no lo pusieron, usar el primer producto de la proforma
+            _nombre = r_nombre.strip() or (lineas_r[0]["descripcion"].splitlines()[0][:45] if lineas_r else None)
+            cab = {"nombre": _nombre, "proveedor": r_prov or None,
                    "referencia": r_ref.strip() or None, "etapa_pedido": r_etapa, "moneda": r_mon,
                    "cliente": "Traki Distribuidora, C.A."}
-            lineas_r = []
-            for i, row in enumerate(filas_r, start=1):
-                q = _nr(row["Cantidad"]); p = _nr(row["Precio unit"])
-                lineas_r.append({
-                    "sn": i, "descripcion": str(row["Producto"]).strip(),
-                    "cantidad": q, "cantidad_aprob": q,
-                    "unidad": row["Unidad"] if pd.notna(row["Unidad"]) else None,
-                    "precio_unit": p, "total": round(q * p, 2), "estado": "Aprobado", "imagen": None,
-                })
             cid = db.guardar_cotizacion(cab, lineas_r, "(en camino)")
             db.actualizar_cotizacion(cid, {
                 "contenedor": r_cont.strip() or None, "guia_bl": r_guia.strip() or None,
@@ -308,7 +347,8 @@ if seccion == "➕ Nueva cotización":
             })
             if r_doc is not None:
                 db.agregar_documento(cid, r_doc.name, "Proforma", r_doc.getvalue(), r_doc.type)
-            st.success(f"Pedido #{cid} registrado en etapa «{r_etapa}». Ya está en el Tablero para seguir su llegada. 📦")
+            st.success(f"Pedido #{cid} registrado con {len(lineas_r)} producto(s) en «{r_etapa}». "
+                       "Ya está en el Tablero para seguir su llegada. 📦")
 
     if archivo is not None:
         # parsear solo una vez por archivo

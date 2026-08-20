@@ -137,7 +137,7 @@ def _mapear_columnas(fila_encabezado):
     return mapa
 
 
-def _extraer_cabecera(rows):
+def _extraer_cabecera(rows, fila_hdr=None):
     """Busca proveedor, cliente, fecha, etc. recorriendo celda por celda.
 
     Trabaja por celda (y por linea dentro de la celda) con anclas ^ para no
@@ -224,7 +224,9 @@ def _extraer_cabecera(rows):
 
     # respaldo de proveedor: si no vino etiquetado, usar el nombre de la 1a linea
     if not cab["proveedor"]:
-        for r in rows[:4]:
+        # el nombre del proveedor siempre esta ARRIBA de la tabla de productos
+        limite = fila_hdr if fila_hdr else 4
+        for r in rows[:limite]:
             for c in r:
                 if not c:
                     continue
@@ -232,9 +234,13 @@ def _extraer_cabecera(rows):
                 n = s.lower()
                 if len(s) < 4:
                     continue
-                if any(k in n for k in ("quotation", "cotizaci", "invoice", "proforma", "packing", "purchase order")):
+                if any(k in n for k in ("quotation", "cotizaci", "invoice", "proforma", "packing",
+                                        "purchase order", "description", "qty", "unit price",
+                                        "amount", "item", "s/n", "weight", "cbm", "ctnr",
+                                        "supplier", "lead time", "color", "thickness", "material",
+                                        "picture", "remarks", "hs code", "model", "marca", "foto")):
                     continue
-                if re.match(r"(to|add|date|tel|attn|from|consignee|dear)\b", n):
+                if re.match(r"(to|add|date|tel|attn|from|consignee|dear|no\.?\b)", n):
                     continue
                 cab["proveedor"] = s.strip(" .,-")
                 break
@@ -282,8 +288,6 @@ def _leer_xls(ruta):
 def _parsear_grid(rows, imgs):
     """Extrae cabecera y lineas de un grid de celdas. Compartido por .xlsx y .xls.
     imgs: dict {fila_excel(1-index): ruta_imagen}."""
-    cabecera = _extraer_cabecera(rows)
-
     fila_hdr = None
     mapa = {}
     for i, r in enumerate(rows):
@@ -291,6 +295,9 @@ def _parsear_grid(rows, imgs):
         if "descripcion" in m and ("cantidad" in m or "precio_unit" in m):
             fila_hdr, mapa = i, m
             break
+
+    cabecera = _extraer_cabecera(rows, fila_hdr)
+
     if fila_hdr is None:
         return {"cabecera": cabecera, "lineas": [], "advertencia": "No se encontro la tabla de productos"}
 
@@ -299,6 +306,17 @@ def _parsear_grid(rows, imgs):
         r = rows[i]
         desc = r[mapa["descripcion"]] if mapa.get("descripcion") is not None and mapa["descripcion"] < len(r) else None
         desc = None if desc is None else str(desc).strip()
+        # cabecera fusionada: si la "descripcion" es solo un numero de item y la
+        # columna de al lado (sin encabezado) tiene texto, usar ese texto
+        d_idx = mapa.get("descripcion")
+        if d_idx is not None and (not desc or re.fullmatch(r"\d+([.,]\d+)?", desc)):
+            usadas = {v for v in mapa.values() if v is not None}
+            for j in (d_idx + 1, d_idx + 2):
+                if j < len(r) and j not in usadas and r[j] is not None:
+                    cand = str(r[j]).strip()
+                    if cand and not re.fullmatch(r"[\d.,\s]*", cand):
+                        desc = cand
+                        break
         # cortar en filas de totales / notas al pie
         if desc and re.match(r"^(total\b|exw total|amount|\d+\.\s|lead\s*time|payment|transportation|package)", _norm(desc)):
             break
