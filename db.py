@@ -22,6 +22,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ESTADOS_APROB = ["Pendiente", "Aprobado", "Eliminado"]
 # etapa de TODO el pedido (nivel cotizacion) — flujo simple que avanza la esposa
 ETAPAS_PEDIDO = ["Solicitud", "Cotizado", "Aprobado", "Comprado", "Recibido"]
+# tipos de documento que China devuelve / se adjuntan al pedido
+TIPOS_DOC = ["Proforma", "Factura (Invoice)", "Guía / BL", "Packing list", "Otro"]
 # etapas por linea (se conserva en DB, ya no se usa en la UI)
 ETAPAS = [
     "Sin ordenar", "Ordenado", "En importacion",
@@ -60,6 +62,19 @@ cotizaciones = Table(
     Column("incoterm", Text), Column("moneda", Text), Column("lead_time", Text),
     Column("forma_pago", Text), Column("transporte", Text), Column("empaque", Text),
     Column("total_exw", Float), Column("archivo", Text), Column("creado_en", Text),
+    # seguimiento del envio (nivel pedido)
+    Column("contenedor", Text), Column("guia_bl", Text), Column("naviera", Text),
+    Column("eta", Text), Column("notas_envio", Text),
+)
+
+# documentos adjuntos a un pedido (proforma, factura, guia/BL, packing...)
+documentos = Table(
+    "documentos", _metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("cotizacion_id", Integer, ForeignKey("cotizaciones.id", ondelete="CASCADE")),
+    Column("nombre", Text), Column("tipo", Text),
+    Column("archivo", LargeBinary), Column("mime", Text),
+    Column("subido_en", Text),
 )
 
 lineas = Table(
@@ -98,7 +113,9 @@ def _asegurar_columnas():
     Necesario porque create_all no altera tablas que ya existen (p.ej. en Supabase)."""
     from sqlalchemy import inspect
     nuevas = {"lineas": {"cantidad_aprob": "FLOAT"},
-              "cotizaciones": {"referencia": "TEXT", "etapa_pedido": "TEXT", "fechas_etapa": "TEXT"}}
+              "cotizaciones": {"referencia": "TEXT", "etapa_pedido": "TEXT", "fechas_etapa": "TEXT",
+                               "contenedor": "TEXT", "guia_bl": "TEXT", "naviera": "TEXT",
+                               "eta": "TEXT", "notas_envio": "TEXT"}}
     insp = inspect(engine())
     with engine().begin() as cx:
         for tabla, cols in nuevas.items():
@@ -158,7 +175,8 @@ def guardar_cotizacion(cabecera, filas, archivo_nombre=""):
 def actualizar_cotizacion(cotizacion_id, campos):
     """Actualiza campos de cabecera. Al cambiar etapa_pedido, sella la fecha del paso."""
     permitidas = {"etapa_pedido", "fechas_etapa", "referencia", "proveedor", "cliente",
-                  "incoterm", "moneda", "fecha_emision"}
+                  "incoterm", "moneda", "fecha_emision",
+                  "contenedor", "guia_bl", "naviera", "eta", "notas_envio"}
     campos = {k: v for k, v in campos.items() if k in permitidas}
     if not campos:
         return
@@ -181,10 +199,46 @@ def actualizar_cotizacion(cotizacion_id, campos):
 
 
 def eliminar_cotizacion(cotizacion_id):
-    """Borra la cotizacion y todas sus lineas (incluye sus fotos)."""
+    """Borra la cotizacion y todas sus lineas y documentos."""
     with engine().begin() as cx:
+        cx.execute(documentos.delete().where(documentos.c.cotizacion_id == cotizacion_id))
         cx.execute(lineas.delete().where(lineas.c.cotizacion_id == cotizacion_id))
         cx.execute(cotizaciones.delete().where(cotizaciones.c.id == cotizacion_id))
+
+
+# ----- documentos adjuntos ---------------------------------------------------
+
+def agregar_documento(cotizacion_id, nombre, tipo, archivo_bytes, mime=None):
+    with engine().begin() as cx:
+        cx.execute(documentos.insert().values(
+            cotizacion_id=cotizacion_id, nombre=nombre, tipo=tipo,
+            archivo=archivo_bytes, mime=mime,
+            subido_en=datetime.now().isoformat(timespec="seconds"),
+        ))
+
+
+def listar_documentos(cotizacion_id):
+    """Lista los documentos SIN los bytes (para no cargar todo en el tablero)."""
+    with engine().connect() as cx:
+        rows = cx.execute(
+            select(documentos.c.id, documentos.c.nombre, documentos.c.tipo,
+                   documentos.c.mime, documentos.c.subido_en)
+            .where(documentos.c.cotizacion_id == cotizacion_id)
+            .order_by(documentos.c.id)
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+def get_documento(doc_id):
+    """Devuelve un documento con sus bytes (para descargar)."""
+    with engine().connect() as cx:
+        r = cx.execute(select(documentos).where(documentos.c.id == doc_id)).mappings().first()
+        return dict(r) if r else None
+
+
+def eliminar_documento(doc_id):
+    with engine().begin() as cx:
+        cx.execute(documentos.delete().where(documentos.c.id == doc_id))
 
 
 def listar_cotizaciones():

@@ -466,6 +466,53 @@ elif seccion == "📋 Tablero de compras":
                         db.actualizar_linea(l["id"], cambios)
                         st.rerun()
 
+            # --- seguimiento del envío (nivel pedido) ---
+            st.markdown("**🚚 Seguimiento del envío**")
+            with st.form(f"envio_{co['id']}"):
+                e1, e2 = st.columns(2)
+                v_cont = e1.text_input("Contenedor", value=co.get("contenedor") or "")
+                v_guia = e2.text_input("Guía / BL", value=co.get("guia_bl") or "")
+                e3, e4 = st.columns(2)
+                v_nav = e3.text_input("Naviera", value=co.get("naviera") or "")
+                v_eta = e4.text_input("ETA — llegada estimada a Venezuela", value=co.get("eta") or "")
+                v_notas = st.text_area("Notas del envío", value=co.get("notas_envio") or "", height=68)
+                if st.form_submit_button("💾 Guardar seguimiento", type="primary"):
+                    db.actualizar_cotizacion(co["id"], {
+                        "contenedor": v_cont.strip() or None, "guia_bl": v_guia.strip() or None,
+                        "naviera": v_nav.strip() or None, "eta": v_eta.strip() or None,
+                        "notas_envio": v_notas.strip() or None,
+                    })
+                    st.rerun()
+
+            # --- documentos adjuntos (proforma, factura, guía/BL...) ---
+            st.markdown("**📎 Documentos del pedido**")
+            docs = db.listar_documentos(co["id"])
+            if not docs:
+                st.caption("Aún no hay documentos. Adjunta la proforma, factura o guía que manda China.")
+            for d in docs:
+                dc1, dc2, dc3 = st.columns([4, 1, 1])
+                dc1.write(f"📄 **{d['tipo']}** · {d['nombre']}  ·  _{(d.get('subido_en') or '')[:10]}_")
+                _full = db.get_documento(d["id"])
+                if _full and _full.get("archivo"):
+                    dc2.download_button("⬇️", data=_full["archivo"], file_name=d["nombre"],
+                                        mime=d.get("mime") or "application/octet-stream",
+                                        key=f"docdl_{d['id']}")
+                if dc3.button("🗑️", key=f"docdel_{d['id']}"):
+                    db.eliminar_documento(d["id"])
+                    st.rerun()
+            with st.form(f"docup_{co['id']}", clear_on_submit=True):
+                u1, u2 = st.columns([1, 2])
+                _tipo = u1.selectbox("Tipo", db.TIPOS_DOC, key=f"doctipo_{co['id']}")
+                _arch = u2.file_uploader("Archivo (PDF, Excel, imagen…)",
+                                         type=["pdf", "xlsx", "xls", "png", "jpg", "jpeg", "docx", "doc"],
+                                         key=f"docfile_{co['id']}")
+                if st.form_submit_button("📎 Adjuntar documento"):
+                    if _arch is not None:
+                        db.agregar_documento(co["id"], _arch.name, _tipo, _arch.getvalue(), _arch.type)
+                        st.rerun()
+                    else:
+                        st.warning("Elige un archivo primero.")
+
             # --- acciones de la cotización: descargar aprobados / eliminar ---
             st.markdown("---")
             n_aprob = sum(1 for l in lineas if l["estado"] == "Aprobado")
